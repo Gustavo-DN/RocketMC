@@ -3,7 +3,7 @@
 Minecraft-only project: a 4-thruster cargo rocket flown by a CC:Tweaked computer.
 It is a video-game delivery vehicle. It carries items (food that spoils) between bases in a Minecraft world and lands softly on a rope net or in a water pool. Nothing here relates to real-world hardware.
 
-Naming: the destination is where the cargo lands. Phases are IGNITION, ASCENT, EXPRESS (fast level cruise; its constants use the `AB_` prefix), TRANSFER, SINK, RELEASE. Delivery modes are WATER, ARC and NET.
+Naming: the destination is where the cargo lands. Phases are IGNITION, ASCENT, EXPRESS (fast level cruise; its constants use the `AB_` prefix), TRANSFER, SINK, DIVE, RELEASE. Delivery modes are WATER, ARC and NET.
 Read `ROCKET4_HANDOFF.md` first. It has all hardware facts, measured physics, API quirks, the code architecture, the flight history and the rejected designs.
 
 ## Files
@@ -19,7 +19,8 @@ Read `ROCKET4_HANDOFF.md` first. It has all hardware facts, measured physics, AP
 - All peripheral and sublevel calls in the flight loop go through the batched `E.io()` (one `parallel.waitForAll`). Never add sequential peripheral calls to the loop: each costs 50 ms.
 - Never cut engines at altitude. Only the ground rule cuts (tilt > 60° within CUT_LOW of the ground).
 - Recovery must never add climbing thrust.
-- ARC and NET share the same route (EXPRESS → BRAKE → TRANSFER → SINK). Keep the mode name ARC.
+- NET route: EXPRESS → BRAKE → TRANSFER → SINK (upright soft landing).
+- ARC route: EXPRESS → BRAKE → DIVE (nose-down arrival onto the net, `arcDir`, constants `DIVE_*`). Keep the mode name ARC.
 - Deliver the finished file; the user copies it into the game.
 
 ## Setup
@@ -45,7 +46,8 @@ for c in "TX=300 TZ=0" "TX=-400 TZ=600" "TX=1500 TZ=-900" "TX=-2500 TZ=300" "TX=
 ```
 
 Baseline to keep or beat:
-- ARC: all land; 15 of 16 within 1.4 blocks, worst 2.8. 400 blocks ≈ 75 s, 7,000 ≈ 111 s, 12,000 ≈ 130 s.
+- ARC (nose-down DIVE, work in progress, not yet tuned): lands 3–100 blocks off at 64–104 m/s, landing tilt 117–167°. 400 blocks ≈ 35 s, 7,000 ≈ 72 s, 12,000 ≈ 94 s. Goal: accuracy back to a few blocks. The simulator prints `tip_xz`, `impV` and `landTilt` for this.
+- Previous upright ARC (commit 4d8760b), for reference: 15 of 16 within 1.4 blocks, worst 2.8.
 - NET: 0.2–0.4 blocks, no CUT.
 
 Any `TERMERR` line is a runtime error (the program's top-level pcall hides it otherwise).
@@ -57,4 +59,4 @@ Any `TERMERR` line is a runtime error (the program's top-level pcall hides it ot
 - The simulator matches real flights well except at 240 m/s EXPRESS; treat high-speed results as approximate.
 
 ## Current open work
-See section 9 of `ROCKET4_HANDOFF.md`. First priority: analyze the user's next real ARC flight.log (3,000–7,000 blocks), especially EXPRESS stability at 200+ m/s and any RECOVER events.
+See section 9 of `ROCKET4_HANDOFF.md`. First priority: tune the ARC nose-down DIVE for accuracy (see the baseline above), then check a real ARC flight.log.

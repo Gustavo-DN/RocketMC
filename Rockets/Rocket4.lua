@@ -135,8 +135,33 @@ local C = {
   WATER_SLOW_DIST = 300,
   WATER_RAMP = 0.3,
   APPROACH_NAV = 3,
-  ARC_AB_MIN = 1000,
+  ARC_AB_MIN = 0,
   ARC_APPROACH_H = 60,
+  DIVE_V = 15,
+  DIVE_H = 250,
+  DIVE_R = 0.4,
+  DIVE_AH = 4,
+  DIVE_VH = 20,
+  DIVE_KX = 0.5,
+  DIVE_TEND = 2,
+  DIVE_VHMIN = 5,
+  DIVE_VYMIN = 20,
+  DIVE_KVY = 0.5,
+  DIVE_XV = 15,
+  DIVE_PN_H = 150,
+  DIVE_AV = 12,
+  DIVE_TGO_MIN = 0.5,
+  DIVE_NAV = 3,
+  DIVE_KV = 0.8,
+  DIVE_VMIN = 15,
+  DIVE_MIN_THR = 0.21,
+  DIVE_MAX_THR = 0.9,
+  DIVE_AOA = 25,
+  DIVE_WFF_TAU = 0.3,
+  DIVE_WFF_MAX = 1.0,
+  DIVE_WFF_STEP = 5,
+  DIVE_STOP_V = 2,
+  DIVE_STOP_T = 0.5,
   AUTH_ERR = 20,
   AUTH_V = 15,
   AUTH_THR = 0.45,
@@ -278,7 +303,7 @@ end
 local attI = { x = 0, z = 0 }
 
 local sinkI = { x = 0, z = 0 }
-local function steer(dirW, w, u, om, dt, thr, boost, sinkFix, ab, vel)
+local function steer(dirW, w, u, om, dt, thr, boost, sinkFix, ab, vel, wff)
   local d = unit(toBody(w, u, dirW))
   local axis = { x = d.z, y = 0, z = -d.x }
   local s = len(axis)
@@ -305,15 +330,22 @@ local function steer(dirW, w, u, om, dt, thr, boost, sinkFix, ab, vel)
   if ab then k = k * C.AB_ATT_K end
   local fx, fy = 0, 0
   if C.AERO_FF and vel and thr and thr > 0.05 then
-    local bv = toBody(w, u, vel)
+    local du = unit(dirW)
+    local bv = toBody(w, u, wff and sub(vel, mul(du, dot(vel, du))) or vel)
     local sp = len(vel)
-    local side = sp > 1 and 1 - math.max(bv.y, 0) / sp or 1
+    local side = (wff or sp <= 1) and 1 or 1 - math.max(bv.y, 0) / sp
     local a = C.AERO_A0 * thr / C.AERO_THR0 / side
     fx = clamp(C.AERO_K * clamp(bv.x, -C.AERO_VMAX, C.AERO_VMAX) / a, -C.AERO_MAX, C.AERO_MAX)
     fy = clamp(C.AERO_K * clamp(bv.z, -C.AERO_VMAX, C.AERO_VMAX) / a, -C.AERO_MAX, C.AERO_MAX)
   end
-  local gx = clamp(k * (C.KP * e.z + ki * attI.z + iz - kd * om.z) + fx, -C.VMAX, C.VMAX) * C.SIGN_X
-  local gy = clamp(-k * (C.KP * e.x + ki * attI.x + ix - kd * om.x) + fy, -C.VMAX, C.VMAX) * C.SIGN_Y
+  local wx, wz = om.x, om.z
+  if wff then wx, wz = wx - wff.x, wz - wff.z end
+  local gx = k * (C.KP * e.z + ki * attI.z + iz - kd * wz) + fx
+  local gy = -k * (C.KP * e.x + ki * attI.x + ix - kd * wx) + fy
+  local gm = math.max(math.abs(gx), math.abs(gy))
+  if wff and gm > C.VMAX then gx, gy = gx * C.VMAX / gm, gy * C.VMAX / gm end
+  gx = clamp(gx, -C.VMAX, C.VMAX) * C.SIGN_X
+  gy = clamp(gy, -C.VMAX, C.VMAX) * C.SIGN_Y
   if C.SWAP then gx, gy = gy, gx end
   return gx, gy
 end
@@ -371,14 +403,14 @@ local function newGuide(start, tgt, md, cl)
   local climbY = start.y + cl
   return {
     start = start, tgt = tgt, mode = md, climb = cl, climbY = climbY,
-    P = { x = tgt.x, y = math.max(climbY, tgt.y + C.NET_HOVER), z = tgt.z },
+    P = { x = tgt.x, y = math.max(climbY, tgt.y + (md == "ARC" and C.DIVE_H or C.NET_HOVER)), z = tgt.z },
     phase = "IGNITION", tmode = "RAMP", throttle = C.START_THRUST,
     cmd = { x = 0, y = 1, z = 0 }, bias = 0,
   }
 end
 
 local function contactPoint(g, pos, nose)
-  if g.mode ~= "WATER" then return sub(pos, mul(nose, C.TAIL_OFFSET)) end
+  if g.mode == "NET" or (g.mode == "ARC" and nose.y > 0) then return sub(pos, mul(nose, C.TAIL_OFFSET)) end
   return add(pos, mul(nose, C.NOSE_OFFSET))
 end
 
@@ -415,6 +447,42 @@ local function approachDir(g, pos, vel, nose, via, nav)
   local al = len(aLat)
   if al > 3 * T then aLat = mul(aLat, 3 * T / al) end
   return unit(add(mul(rh, T), aLat))
+end
+
+local function arcDir(g, pos, vel)
+  local tgt = g.tgt
+  local hx, hz = tgt.x - pos.x, tgt.z - pos.z
+  local x = math.sqrt(hx * hx + hz * hz)
+  local h = math.max(pos.y - tgt.y - C.NOSE_OFFSET, 0)
+  local sp = math.min(C.DIVE_VH, math.sqrt(2 * C.DIVE_AH * x), C.DIVE_KX * x)
+  local ux, uz = 0, 0
+  if x > 1e-6 then ux, uz = hx / x, hz / x end
+  local vyd = -math.max(h / (2 * x / math.max(sp, C.DIVE_VHMIN) + C.DIVE_TEND), C.DIVE_VYMIN)
+  local fy = vel.y < vyd and C.DIVE_KVY * (vyd - vel.y) * clamp(x / C.DIVE_XV, 0, 1) or 0
+  local f = { x = C.DIVE_KV * (ux * sp - vel.x) + C.DRAG * vel.x, y = fy, z = C.DIVE_KV * (uz * sp - vel.z) + C.DRAG * vel.z }
+  if h < C.DIVE_PN_H and -vel.y > C.DIVE_VMIN then
+    local vdn = -vel.y
+    local tArr = math.max((math.sqrt(vdn * vdn + 2 * C.DIVE_AV * h) - vdn) / C.DIVE_AV, C.DIVE_TGO_MIN)
+    local e = math.exp(-C.DRAG * tArr)
+    local k = (1 - e) / C.DRAG
+    local n = C.DIVE_NAV / (tArr * tArr)
+    f = { x = n * (hx - vel.x * k), y = 0, z = n * (hz - vel.z * k) }
+  end
+  local ta = C.THRUST_ACC
+  local v = len(vel)
+  if v < C.DIVE_VMIN then
+    g.throttle = C.DIVE_MIN_THR
+    return unit({ x = f.x, y = -C.GRAV, z = f.z })
+  end
+  local vu = mul(vel, 1 / v)
+  local fp = dot(f, vu)
+  local fn = sub(f, mul(vu, fp))
+  local fnl = len(fn)
+  local T = clamp(fp, C.DIVE_MIN_THR * ta, C.DIVE_MAX_THR * ta)
+  g.throttle = T / ta
+  if fnl < 1e-6 then return vu end
+  local sn = clamp(fnl / (T + C.AB_LIFT * v), 0, math.sin(math.rad(C.DIVE_AOA)))
+  return add(mul(vu, math.sqrt(1 - sn * sn)), mul(fn, sn / fnl))
 end
 
 local function levelDir(g, pos, vel, fx, fz, dt)
@@ -487,23 +555,27 @@ local function guideStep(g, pos, vel, nose, dt)
       local bx, bz = tgt.x - pos.x, tgt.z - pos.z
       if C.EXPRESS and math.sqrt(bx * bx + bz * bz) > (g.mode == "ARC" and C.ARC_AB_MIN or C.AB_MIN_DIST) then
         g.phase, g.tmode = "EXPRESS", "AB"
+      elseif g.mode == "ARC" then
+        g.phase, g.tmode = "DIVE", "DIVE"
       end
     end
   end
   if g.phase == "EXPRESS" then
     local hx, hz = tgt.x - pos.x, tgt.z - pos.z
     local dh = math.sqrt(hx * hx + hz * hz)
-    local handoff = C.NET_VMAX * C.NET_VMAX / (2 * C.NET_ABRAKE) + C.AB_MARGIN
+    local arc = g.mode == "ARC"
+    local vEnd = arc and C.DIVE_V or C.NET_VMAX
+    local handoff = arc and C.DIVE_V * C.DIVE_V / (2 * C.DIVE_AH) + C.DIVE_R * math.max(pos.y - tgt.y - C.NOSE_OFFSET, 0) or C.NET_VMAX * C.NET_VMAX / (2 * C.NET_ABRAKE) + C.AB_MARGIN
     local v = len(vel)
     if g.tmode == "BRAKE" and dh - handoff > C.AB_REARM_D then
-      local sp0 = math.sqrt(C.NET_VMAX * C.NET_VMAX + 2 * C.AB_BRAKE * math.max(dh - handoff, 0))
+      local sp0 = math.sqrt(vEnd * vEnd + 2 * C.AB_BRAKE * math.max(dh - handoff, 0))
       if v < C.AB_REARM_K * sp0 then g.tmode = "AB" end
     end
-    if dh <= handoff or (g.tmode == "BRAKE" and v <= C.NET_VMAX + 5 and dh - handoff <= C.AB_REARM_D) then
-      g.phase, g.tmode, g.bias = "TRANSFER", "AUTO", 0
-    elseif g.tmode == "BRAKE" or (dh - handoff) <= math.max(v * v - C.NET_VMAX * C.NET_VMAX, 0) / (2 * C.AB_BRAKE) + C.AB_PAD then
+    if dh <= handoff or (g.tmode == "BRAKE" and v <= vEnd + 5 and dh - handoff <= C.AB_REARM_D) then
+      g.phase, g.tmode, g.bias = arc and "DIVE" or "TRANSFER", arc and "DIVE" or "AUTO", 0
+    elseif g.tmode == "BRAKE" or (dh - handoff) <= math.max(v * v - vEnd * vEnd, 0) / (2 * C.AB_BRAKE) + C.AB_PAD then
       g.tmode = "BRAKE"
-      local sp = math.min(C.AB_VMAX, math.sqrt(C.NET_VMAX * C.NET_VMAX + 2 * C.AB_BRAKE * math.max(dh - handoff, 0)))
+      local sp = math.min(C.AB_VMAX, math.sqrt(vEnd * vEnd + 2 * C.AB_BRAKE * math.max(dh - handoff, 0)))
       return velCmd(g, { x = hx / dh * sp, y = clamp((g.P.y - pos.y) * 0.5, -10, 10), z = hz / dh * sp }, vel, nose, dt, C.NET_TILT, C.AB_MAX_THR, true)
     else
       g.tmode = "AB"
@@ -515,6 +587,15 @@ local function guideStep(g, pos, vel, nose, dt)
       end
       return levelDir(g, pos, vel, hx / dh, hz / dh, dt)
     end
+  end
+  if g.phase == "DIVE" then
+    local tip = add(pos, mul(nose, C.NOSE_OFFSET))
+    if len(vel) < C.DIVE_STOP_V then g.stuck = (g.stuck or 0) + dt else g.stuck = 0 end
+    if tip.y <= tgt.y or g.stuck >= C.DIVE_STOP_T then
+      g.phase, g.throttle, g.tmode = "TOUCHDOWN", 0, "OFF"
+      return nil, true
+    end
+    return arcDir(g, pos, vel)
   end
   if g.phase == "ASCENT" then
     local want = UP
@@ -1139,7 +1220,7 @@ local function recoverStep(g, pos, vel, nose, om, dt)
     g.recOk = g.recOk + dt
     if g.recOk >= C.REC_HOLD then
       g.rec = false
-      if g.phase == "EXPRESS" then g.phase, g.tmode, g.bias = "TRANSFER", "AUTO", 0 end
+      if g.phase == "EXPRESS" or g.phase == "DIVE" then g.phase, g.tmode, g.bias = "TRANSFER", "AUTO", 0 end
       return nil
     end
   else
@@ -1154,7 +1235,7 @@ end
 
 local function drawFlight(start, tgt)
   clear()
-  local colorsFor = { IGNITION = colors.yellow, ASCENT = colors.orange, CRUISE = colors.cyan, TRANSFER = colors.cyan, EXPRESS = colors.red, SINK = colors.lightBlue, RELEASE = colors.lime, TOUCHDOWN = colors.red, CUT = colors.red, ABORT = colors.red, RECOVER = colors.orange }
+  local colorsFor = { IGNITION = colors.yellow, ASCENT = colors.orange, CRUISE = colors.cyan, TRANSFER = colors.cyan, EXPRESS = colors.red, DIVE = colors.magenta, SINK = colors.lightBlue, RELEASE = colors.lime, TOUCHDOWN = colors.red, CUT = colors.red, ABORT = colors.red, RECOVER = colors.orange }
   header(fl.phase .. (fl.cut and (" " .. fl.cut) or "") .. " ", colorsFor[fl.phase] or colors.white)
   local p = fl.pos
   text(2, 3, "FLIGHT " .. mode, colors.yellow)
@@ -1203,7 +1284,15 @@ local function flight(tgt, pred)
       g.sinkStarted = true
       sinkI.x, sinkI.z = 0, 0
     end
-    fl.gx, fl.gy = steer(dirW, w, u, om, dt, g.throttle, C.NET_ATT_BOOST and mode ~= "WATER" and (g.phase == "TRANSFER" or g.phase == "SINK"), sinking, g.phase == "EXPRESS", vel)
+    local d, wff = unit(dirW), nil
+    if g.phase == "DIVE" and g.dPrev then
+      local c = dot(g.dPrev, d) > math.cos(math.rad(C.DIVE_WFF_STEP)) and mul(cross(g.dPrev, d), 1 / dt) or { x = 0, y = 0, z = 0 }
+      g.wff = g.wff and add(g.wff, mul(sub(c, g.wff), math.min(1, dt / C.DIVE_WFF_TAU))) or c
+      local m = len(g.wff)
+      wff = toBody(w, u, m > C.DIVE_WFF_MAX and mul(g.wff, C.DIVE_WFF_MAX / m) or g.wff)
+    end
+    g.dPrev = g.phase == "DIVE" and d or nil
+    fl.gx, fl.gy = steer(dirW, w, u, om, dt, g.throttle, C.NET_ATT_BOOST and mode ~= "WATER" and (g.phase == "TRANSFER" or g.phase == "SINK"), sinking, g.phase == "EXPRESS" or g.phase == "DIVE", vel, wff)
   end
   local function guide()
     local t0 = os.clock()
@@ -1317,7 +1406,7 @@ local function flight(tgt, pred)
       else
         fl.gx, fl.gy, fl.r = 0, 0, 0
       end
-      if dir and (g.rec or g.phase == "EXPRESS" or g.phase == "TRANSFER") and (fl.err or 0) > C.AUTH_ERR and len(vel) > C.AUTH_V and not (vel.y > C.REC_CLIMB_V and nose.y > 0.7) then
+      if dir and (g.rec or g.phase == "EXPRESS" or g.phase == "TRANSFER" or g.phase == "DIVE") and (fl.err or 0) > C.AUTH_ERR and len(vel) > C.AUTH_V and not (vel.y > C.REC_CLIMB_V and nose.y > 0.7) then
         g.throttle = math.max(g.throttle, C.AUTH_THR)
       end
       E.set(g.throttle, fl.gx, fl.gy, fl.r)
