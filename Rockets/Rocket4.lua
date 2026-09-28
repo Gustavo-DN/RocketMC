@@ -42,11 +42,11 @@ local C = {
   LIFTOFF_VY = 0.5,
   TURN_RATE = 8,
   KV = 1.0,
-  AIM_MIN_V = 8,
+  ALIGN_MIN_V = 8,
   SIGN_X = 1,
   SIGN_Y = 1,
   SWAP = false,
-  HIT_RADIUS = 3,
+  ARRIVE_RADIUS = 3,
   CUT_TIME = 0.1,
   NOSE_OFFSET = 12.7,
   TAIL_OFFSET = 4.8,
@@ -106,7 +106,7 @@ local C = {
   SINK_MAXK = 2.5,
   FAST_VMAX = 100,
   FAST_ABRAKE = 7,
-  AFTERBURNER = true,
+  EXPRESS = true,
   AB_MIN_DIST = 1000,
   AB_VMAX = 500,
   AB_MARGIN = 120,
@@ -131,10 +131,10 @@ local C = {
   AB_BRAKE = 7,
   AB_REARM_D = 400,
   AB_REARM_K = 0.5,
-  SPLASH_FAST_THR = 1.0,
-  SPLASH_SLOW_DIST = 300,
-  SPLASH_RAMP = 0.3,
-  DIVE_NAV = 3,
+  WATER_FAST_THR = 1.0,
+  WATER_SLOW_DIST = 300,
+  WATER_RAMP = 0.3,
+  APPROACH_NAV = 3,
   ARC_AB_MIN = 1000,
   ARC_APPROACH_H = 60,
   AUTH_ERR = 20,
@@ -145,13 +145,13 @@ local C = {
   SIM_TIME = 240,
   SIM_TURN = 3,
   LOG_DT = 0.25,
-  SAVE = "rocket.target",
+  SAVE = "rocket.dest",
   LOG = "rocket.log",
   FLIGHT_LOG = "flight.log",
-  MODES = { "SPLASH", "ARC", "NET" },
+  MODES = { "WATER", "ARC", "NET" },
 }
 local climb = C.CLIMB
-local mode = "SPLASH"
+local mode = "WATER"
 
 local E = { names = {}, eng = {}, tanks = {}, cmd = {}, sx = {}, sy = {}, kp = 1, kr = 1, ms = 0 }
 for _, n in ipairs(peripheral.getNames()) do
@@ -269,9 +269,9 @@ local function turnToward(a, b, maxStep)
   return unit(add(mul(a, math.sin((1 - t) * ang) / sn), mul(b, math.sin(t * ang) / sn)))
 end
 
-local function aim(dir, vel)
+local function align(dir, vel)
   local sp = len(vel)
-  if sp < C.AIM_MIN_V then return dir end
+  if sp < C.ALIGN_MIN_V then return dir end
   return unit(add(dir, mul(sub(dir, mul(vel, 1 / sp)), C.KV)))
 end
 
@@ -288,7 +288,7 @@ local function steer(dirW, w, u, om, dt, thr, boost, sinkFix, ab, vel)
     attI.x = clamp(attI.x + e.x * dt, -C.ATT_IMAX, C.ATT_IMAX)
     attI.z = clamp(attI.z + e.z * dt, -C.ATT_IMAX, C.ATT_IMAX)
   end
-  local k = ((mode == "SPLASH" or ab) and thr and thr > C.ATT_REF_THR) and C.ATT_REF_THR / thr or 1
+  local k = ((mode == "WATER" or ab) and thr and thr > C.ATT_REF_THR) and C.ATT_REF_THR / thr or 1
   if boost and thr and thr > 0 then k = clamp(C.NET_ATT_REF / thr, 1, C.NET_ATT_MAXK) end
   local ix, iz, kd = 0, 0, (k < 1) and C.KD * C.CRUISE_KD_MULT or C.KD
   local ki = sinkFix and 0 or C.ATT_KI
@@ -378,7 +378,7 @@ local function newGuide(start, tgt, md, cl)
 end
 
 local function contactPoint(g, pos, nose)
-  if g.mode ~= "SPLASH" then return sub(pos, mul(nose, C.TAIL_OFFSET)) end
+  if g.mode ~= "WATER" then return sub(pos, mul(nose, C.TAIL_OFFSET)) end
   return add(pos, mul(nose, C.NOSE_OFFSET))
 end
 
@@ -400,18 +400,18 @@ local function velCmd(g, vDes, vel, nose, dt, maxTilt, maxThr, capLift)
   return limitTilt(unit(acc), maxTilt)
 end
 
-local function diveDir(g, pos, vel, nose, aim, nav)
-  local r = aim and sub(aim, pos) or sub(g.tgt, add(pos, mul(nose, C.NOSE_OFFSET)))
+local function approachDir(g, pos, vel, nose, via, nav)
+  local r = via and sub(via, pos) or sub(g.tgt, add(pos, mul(nose, C.NOSE_OFFSET)))
   local dist = len(r)
   if dist < 1e-6 then return nose end
   local rh = mul(r, 1 / dist)
-  local tgo = clamp(dist / math.max(dot(vel, rh), 1), 0.3, 20)
+  local tArr = clamp(dist / math.max(dot(vel, rh), 1), 0.3, 20)
   local acc = mul(vel, -C.DRAG)
   acc.y = acc.y - C.GRAV
-  local zem = sub(r, add(mul(vel, tgo), mul(acc, 0.5 * tgo * tgo)))
-  local zp = sub(zem, mul(rh, dot(zem, rh)))
+  local drift = sub(r, add(mul(vel, tArr), mul(acc, 0.5 * tArr * tArr)))
+  local zp = sub(drift, mul(rh, dot(drift, rh)))
   local T = math.max(g.throttle, 0.02) * C.THRUST_ACC
-  local aLat = mul(zp, (nav or C.DIVE_NAV) / (tgo * tgo))
+  local aLat = mul(zp, (nav or C.APPROACH_NAV) / (tArr * tArr))
   local al = len(aLat)
   if al > 3 * T then aLat = mul(aLat, 3 * T / al) end
   return unit(add(mul(rh, T), aLat))
@@ -457,40 +457,40 @@ local function guideStep(g, pos, vel, nose, dt)
   if g.phase == "IGNITION" then
     if vel.y > C.LIFTOFF_VY then
       g.throttle = math.min(g.throttle + C.THR_MARGIN, C.MAX_THRUST)
-      g.phase, g.tmode = "BOOST", "HOLD"
+      g.phase, g.tmode = "ASCENT", "HOLD"
     else
       g.throttle = math.min(g.throttle + C.THR_RAMP * dt, C.MAX_THRUST)
       return nil
     end
   end
-  if g.mode == "SPLASH" then
+  if g.mode == "WATER" then
     local r = sub(tgt, add(pos, mul(nose, C.NOSE_OFFSET)))
     local dn = len(r)
     local vc = dn > 1e-6 and dot(vel, r) / dn or 0
     local closing = g.lastDn and dn < g.lastDn
     g.lastDn = dn
-    local terminal = g.phase == "CRUISE"
+    local final = g.phase == "CRUISE"
     local passed = false
-    if terminal and len(vel) < 2 then g.stuck = (g.stuck or 0) + dt else g.stuck = 0 end
+    if final and len(vel) < 2 then g.stuck = (g.stuck or 0) + dt else g.stuck = 0 end
     if g.stuck > 1 then passed = true end
-    if dn < C.HIT_RADIUS or passed or (terminal and ((vc > 1 and dn / vc < C.CUT_TIME) or (closing == false and dn < 20))) then
-      g.phase, g.throttle, g.tmode = "IMPACT", 0, "OFF"
+    if dn < C.ARRIVE_RADIUS or passed or (final and ((vc > 1 and dn / vc < C.CUT_TIME) or (closing == false and dn < 20))) then
+      g.phase, g.throttle, g.tmode = "TOUCHDOWN", 0, "OFF"
       return nil, true
     end
   end
   local los = sub(tgt, pos)
-  if g.phase == "BOOST" and pos.y >= g.climbY then
-    if g.mode == "SPLASH" then
+  if g.phase == "ASCENT" and pos.y >= g.climbY then
+    if g.mode == "WATER" then
       g.phase = "CRUISE"
     else
       g.phase, g.tmode, g.bias = "TRANSFER", "AUTO", 0
       local bx, bz = tgt.x - pos.x, tgt.z - pos.z
-      if C.AFTERBURNER and math.sqrt(bx * bx + bz * bz) > (g.mode == "ARC" and C.ARC_AB_MIN or C.AB_MIN_DIST) then
-        g.phase, g.tmode = "AFTERBURNER", "AB"
+      if C.EXPRESS and math.sqrt(bx * bx + bz * bz) > (g.mode == "ARC" and C.ARC_AB_MIN or C.AB_MIN_DIST) then
+        g.phase, g.tmode = "EXPRESS", "AB"
       end
     end
   end
-  if g.phase == "AFTERBURNER" then
+  if g.phase == "EXPRESS" then
     local hx, hz = tgt.x - pos.x, tgt.z - pos.z
     local dh = math.sqrt(hx * hx + hz * hz)
     local handoff = C.NET_VMAX * C.NET_VMAX / (2 * C.NET_ABRAKE) + C.AB_MARGIN
@@ -509,30 +509,30 @@ local function guideStep(g, pos, vel, nose, dt)
       g.tmode = "AB"
       local abFloor = math.min(C.AB_MAX_THR, (C.GRAV + 1) / (C.THRUST_ACC * math.max(math.sin(math.rad(C.AB_PITCH_UP)), 0.05)))
       if v < C.AB_VMAX - 5 or g.throttle < abFloor then
-        g.throttle = math.min(g.throttle + C.SPLASH_RAMP * dt, C.AB_MAX_THR)
+        g.throttle = math.min(g.throttle + C.WATER_RAMP * dt, C.AB_MAX_THR)
       elseif v > C.AB_VMAX then
         g.throttle = math.max(g.throttle - 1.5 * dt, abFloor)
       end
       return levelDir(g, pos, vel, hx / dh, hz / dh, dt)
     end
   end
-  if g.phase == "BOOST" then
+  if g.phase == "ASCENT" then
     local want = UP
-    if g.mode == "SPLASH" then
+    if g.mode == "WATER" then
       local f = clamp((pos.y - g.start.y) / g.climb, 0, 1)
       f = f * f
       want = unit(add(mul(UP, 1 - f), mul(unit(los), f)))
     end
     g.cmd = turnToward(g.cmd, want, math.rad(C.TURN_RATE) * dt)
-    return aim(g.cmd, vel)
+    return align(g.cmd, vel)
   elseif g.phase == "CRUISE" then
-    local want = len(los) > C.SPLASH_SLOW_DIST and C.SPLASH_FAST_THR or C.CRUISE_THR
+    local want = len(los) > C.WATER_SLOW_DIST and C.WATER_FAST_THR or C.CRUISE_THR
     if g.throttle < want then
-      g.throttle = math.min(g.throttle + C.SPLASH_RAMP * dt, want)
+      g.throttle = math.min(g.throttle + C.WATER_RAMP * dt, want)
     else
       g.throttle = want
     end
-    return diveDir(g, pos, vel, nose)
+    return approachDir(g, pos, vel, nose)
   elseif g.phase == "TRANSFER" then
     local to = sub(g.P, pos)
     local dP = len(to)
@@ -567,22 +567,22 @@ local function newTracker() return { bestD = math.huge } end
 local function track(tr, p, tgt)
   local d = len(sub(tgt, p))
   if d < tr.bestD then tr.bestD, tr.best = d, p end
-  if tr.prev and not tr.hit and tr.prev.y > tgt.y and p.y <= tgt.y then
+  if tr.prev and not tr.pass and tr.prev.y > tgt.y and p.y <= tgt.y then
     local f = (tr.prev.y - tgt.y) / (tr.prev.y - p.y)
-    tr.hit = add(tr.prev, mul(sub(p, tr.prev), f))
+    tr.pass = add(tr.prev, mul(sub(p, tr.prev), f))
   end
   tr.prev = p
 end
 
 local function missOf(tr, start, tgt)
-  local p = tr.hit or tr.best
+  local p = tr.pass or tr.best
   if not p then return nil end
   local mx, mz = p.x - tgt.x, p.z - tgt.z
   local fx, fz = tgt.x - start.x, tgt.z - start.z
   local fd = math.sqrt(fx * fx + fz * fz)
   if fd < 1e-6 then fx, fz, fd = 0, -1, 1 end
   fx, fz = fx / fd, fz / fd
-  return { total = math.sqrt(mx * mx + mz * mz), long = mx * fx + mz * fz, right = mz * fx - mx * fz, crossed = tr.hit ~= nil }
+  return { total = math.sqrt(mx * mx + mz * mz), long = mx * fx + mz * fz, right = mz * fx - mx * fz, crossed = tr.pass ~= nil }
 end
 
 local function predict(start, tgt, md, cl)
@@ -596,7 +596,7 @@ local function predict(start, tgt, md, cl)
   local done, tDone = false, nil
   while t < C.SIM_TIME do
     local near = len(sub(tgt, pos)) < 150
-    local dt = (g.phase == "IGNITION" or g.phase == "BOOST" or near) and 0.1 or 0.25
+    local dt = (g.phase == "IGNITION" or g.phase == "ASCENT" or near) and 0.1 or 0.25
     local dir
     if not done then
       local fin
@@ -620,12 +620,12 @@ local function predict(start, tgt, md, cl)
       vel = { x = 0, y = 0, z = 0 }
     end
     t = t + dt
-    if g.phase ~= "IGNITION" and g.phase ~= "BOOST" then track(tr, contactPoint(g, pos, nose), tgt) end
+    if g.phase ~= "IGNITION" and g.phase ~= "ASCENT" then track(tr, contactPoint(g, pos, nose), tgt) end
     if t >= nextRec then
       pts[#pts + 1] = pos
       nextRec = t + 0.25
     end
-    if done and (tr.hit or t - tDone > 4) then break end
+    if done and (tr.pass or t - tDone > 4) then break end
   end
   pts[#pts + 1] = pos
   return { pts = pts, eta = tDone, miss = done and missOf(tr, start, tgt) or nil }
@@ -732,7 +732,7 @@ local function plot(start, tgt, cur, pred, trail)
     fill(PX + PW, r, 1, colors.gray)
   end
   if not start or not tgt then
-    local m = start and "NO TARGET" or "NO POSITION"
+    local m = start and "NO DESTINATION" or "NO POSITION"
     text(PX + math.floor((PW - #m) / 2), PY + math.floor(PH / 2), m, colors.gray)
     return
   end
@@ -843,7 +843,7 @@ local function plot(start, tgt, cur, pred, trail)
   end
 end
 
-local fields = { { label = "X", value = "" }, { label = "Y", value = "" }, { label = "Z", value = "" }, { label = "CLIMB", value = tostring(C.CLIMB) }, { label = "MODE", value = "SPLASH", choice = true } }
+local fields = { { label = "X", value = "" }, { label = "Y", value = "" }, { label = "Z", value = "" }, { label = "CLIMB", value = tostring(C.CLIMB) }, { label = "MODE", value = "WATER", choice = true } }
 local active = 1
 local msg = ""
 local FX, FW = 9, 14
@@ -863,7 +863,7 @@ end
 
 local function fieldRow(i) return 3 + i end
 
-local function target()
+local function destination()
   local x, y, z = tonumber(fields[1].value), tonumber(fields[2].value), tonumber(fields[3].value)
   if x and y and z then return { x = x, y = y, z = z } end
 end
@@ -901,7 +901,7 @@ end
 local function drawInput()
   clear()
   header(tel.sub and "SUB-LEVEL OK " or "NO SUB-LEVEL ", tel.sub and colors.lime or colors.red)
-  text(2, 3, "TARGET", colors.yellow)
+  text(2, 3, "DESTINATION", colors.yellow)
   for i, f in ipairs(fields) do
     local r = fieldRow(i)
     local on = i == active
@@ -919,7 +919,7 @@ local function drawInput()
   text(2, 15, "ENGINE " .. fuelStr(tel.eng), colors.white)
   text(2, 16, "TANK   " .. fuelStr(tel.tank), colors.white)
   climb = climbValue() or C.CLIMB
-  local tgt = target()
+  local tgt = destination()
   local pl = currentPlan(p, tgt, fields[5].value, climb)
   plot(p, tgt, nil, pl, nil)
   if p and tgt and not pl then text(PX - 1, 17, "PLANNING...", colors.gray) end
@@ -937,7 +937,7 @@ local function drawInput()
 end
 
 local function tryLaunch()
-  local t = target()
+  local t = destination()
   if not t then msg = "ENTER ALL THREE COORDS" return nil end
   local c = climbValue()
   if not c then msg = "CLIMB MUST BE 1 OR MORE" return nil end
@@ -1099,7 +1099,7 @@ end
 
 local fl = { phase = "IGNITION", trail = {} }
 
-local SAFE_UP = { IGNITION = true, BOOST = true, TRANSFER = true, SINK = true }
+local SAFE_UP = { IGNITION = true, ASCENT = true, TRANSFER = true, SINK = true }
 
 local function safety(g, pos, nose, dir, om, dt, now)
   local tilt = math.deg(math.acos(clamp(nose.y, -1, 1)))
@@ -1109,7 +1109,7 @@ local function safety(g, pos, nose, dir, om, dt, now)
     g.safeFrom, g.safePhase, g.safeT, g.badT, g.errPrev, g.closing = g.safePhase, g.phase, now, 0, nil, 0
 
   end
-  local up = SAFE_UP[g.phase] and not (g.phase == "BOOST" and g.mode == "SPLASH")
+  local up = SAFE_UP[g.phase] and not (g.phase == "ASCENT" and g.mode == "WATER")
   local low = pos.y - math.min(g.start.y, g.tgt.y) < C.CUT_LOW
   if (up or g.rec) and low and tilt > C.CUT_TILT then
     g.cutT = (g.cutT or 0) + dt
@@ -1120,7 +1120,7 @@ local function safety(g, pos, nose, dir, om, dt, now)
   if g.rec or g.phase == "IGNITION" then return nil end
   local why
   if up then
-    local grace = g.safeFrom == "AFTERBURNER" and C.CUT_GRACE or 0
+    local grace = g.safeFrom == "EXPRESS" and C.CUT_GRACE or 0
     if tilt > C.REC_TILT and now - g.safeT >= grace then why = "TILT" end
   elseif dir then
     if g.errPrev then g.closing = g.closing + ((g.errPrev - err) / dt - g.closing) * 0.2 end
@@ -1139,7 +1139,7 @@ local function recoverStep(g, pos, vel, nose, om, dt)
     g.recOk = g.recOk + dt
     if g.recOk >= C.REC_HOLD then
       g.rec = false
-      if g.phase == "AFTERBURNER" then g.phase, g.tmode, g.bias = "TRANSFER", "AUTO", 0 end
+      if g.phase == "EXPRESS" then g.phase, g.tmode, g.bias = "TRANSFER", "AUTO", 0 end
       return nil
     end
   else
@@ -1154,7 +1154,7 @@ end
 
 local function drawFlight(start, tgt)
   clear()
-  local colorsFor = { IGNITION = colors.yellow, BOOST = colors.orange, CRUISE = colors.cyan, TRANSFER = colors.cyan, AFTERBURNER = colors.red, SINK = colors.lightBlue, RELEASE = colors.lime, IMPACT = colors.red, CUT = colors.red, ABORT = colors.red, RECOVER = colors.orange }
+  local colorsFor = { IGNITION = colors.yellow, ASCENT = colors.orange, CRUISE = colors.cyan, TRANSFER = colors.cyan, EXPRESS = colors.red, SINK = colors.lightBlue, RELEASE = colors.lime, TOUCHDOWN = colors.red, CUT = colors.red, ABORT = colors.red, RECOVER = colors.orange }
   header(fl.phase .. (fl.cut and (" " .. fl.cut) or "") .. " ", colorsFor[fl.phase] or colors.white)
   local p = fl.pos
   text(2, 3, "FLIGHT " .. mode, colors.yellow)
@@ -1198,12 +1198,12 @@ local function flight(tgt, pred)
   fl.trail, fl.pred, fl.result, fl.cut, fl.r, fl.tilt, fl.err = {}, pred, nil, nil, 0, 0, 0
   tel.flying = true
   local function setDir(dirW, w, u, om, dt, vel)
-    local sinking = C.SINK_FIX and mode ~= "SPLASH" and g.phase == "SINK"
+    local sinking = C.SINK_FIX and mode ~= "WATER" and g.phase == "SINK"
     if sinking and not g.sinkStarted then
       g.sinkStarted = true
       sinkI.x, sinkI.z = 0, 0
     end
-    fl.gx, fl.gy = steer(dirW, w, u, om, dt, g.throttle, C.NET_ATT_BOOST and mode ~= "SPLASH" and (g.phase == "TRANSFER" or g.phase == "SINK"), sinking, g.phase == "AFTERBURNER", vel)
+    fl.gx, fl.gy = steer(dirW, w, u, om, dt, g.throttle, C.NET_ATT_BOOST and mode ~= "WATER" and (g.phase == "TRANSFER" or g.phase == "SINK"), sinking, g.phase == "EXPRESS", vel)
   end
   local function guide()
     local t0 = os.clock()
@@ -1243,7 +1243,7 @@ local function flight(tgt, pred)
           if g.abLock and g.abY > ceil - 50 then g.abY = ceil - 50 end
         end
       end
-      if dir and not done and (g.rec or g.phase == "TRANSFER" or g.phase == "SINK" or g.phase == "AFTERBURNER") then
+      if dir and not done and (g.rec or g.phase == "TRANSFER" or g.phase == "SINK" or g.phase == "EXPRESS") then
         g.cmdS = turnToward(g.cmdS or nose, unit(dir), math.rad(C.CMD_RATE) * dt)
         dir = g.cmdS
       else
@@ -1261,7 +1261,7 @@ local function flight(tgt, pred)
       end
       fl.phase, fl.tmode, fl.thr = g.rec and "RECOVER" or g.phase, g.tmode, g.throttle
       fl.pos, fl.speed, fl.dist = pos, len(vel), len(sub(tgt, pos))
-      if g.phase ~= "IGNITION" and g.phase ~= "BOOST" then track(tr, contactPoint(g, pos, nose), tgt) end
+      if g.phase ~= "IGNITION" and g.phase ~= "ASCENT" then track(tr, contactPoint(g, pos, nose), tgt) end
       if now >= nextTrail then
         fl.trail[#fl.trail + 1] = pos
         nextTrail = now + 0.25
@@ -1284,12 +1284,12 @@ local function flight(tgt, pred)
         fl.thr, fl.gx, fl.gy, fl.r = 0, 0, 0, 0
         local cutSpeed, cutTime = len(vel), now - t0
         local flareOff
-        if mode == "SPLASH" and not fl.cut then
+        if mode == "WATER" and not fl.cut then
           pcall(redstone.setOutput, C.FLARE_SIDE, true)
           flareOff = os.clock() + C.FLARE_PULSE
         end
         local stop, still = os.clock() + 4, 0
-        while os.clock() < stop and not tr.hit do
+        while os.clock() < stop and not tr.pass do
           if flareOff and os.clock() >= flareOff then
             pcall(redstone.setOutput, C.FLARE_SIDE, false)
             flareOff = nil
@@ -1317,7 +1317,7 @@ local function flight(tgt, pred)
       else
         fl.gx, fl.gy, fl.r = 0, 0, 0
       end
-      if dir and (g.rec or g.phase == "AFTERBURNER" or g.phase == "TRANSFER") and (fl.err or 0) > C.AUTH_ERR and len(vel) > C.AUTH_V and not (vel.y > C.REC_CLIMB_V and nose.y > 0.7) then
+      if dir and (g.rec or g.phase == "EXPRESS" or g.phase == "TRANSFER") and (fl.err or 0) > C.AUTH_ERR and len(vel) > C.AUTH_V and not (vel.y > C.REC_CLIMB_V and nose.y > 0.7) then
         g.throttle = math.max(g.throttle, C.AUTH_THR)
       end
       E.set(g.throttle, fl.gx, fl.gy, fl.r)

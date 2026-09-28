@@ -1,6 +1,9 @@
 # CLAUDE.md: Rocket4 (CC:Tweaked rocket for Minecraft Create Aeronautics / Sable)
 
 Minecraft-only project: a 4-thruster cargo rocket flown by a CC:Tweaked computer.
+It is a video-game delivery vehicle. It carries items (food that spoils) between bases in a Minecraft world and lands softly on a rope net or in a water pool. Nothing here relates to real-world hardware.
+
+Naming: the destination is where the cargo lands. Phases are IGNITION, ASCENT, EXPRESS (fast level cruise; its constants use the `AB_` prefix), TRANSFER, SINK, RELEASE. Delivery modes are WATER, ARC and NET.
 Read `ROCKET4_HANDOFF.md` first. It has all hardware facts, measured physics, API quirks, the code architecture, the flight history and the rejected designs.
 
 ## Files
@@ -16,7 +19,7 @@ Read `ROCKET4_HANDOFF.md` first. It has all hardware facts, measured physics, AP
 - All peripheral and sublevel calls in the flight loop go through the batched `E.io()` (one `parallel.waitForAll`). Never add sequential peripheral calls to the loop: each costs 50 ms.
 - Never cut engines at altitude. Only the ground rule cuts (tilt > 60° within CUT_LOW of the ground).
 - Recovery must never add climbing thrust.
-- ARC and NET share the same route (AFTERBURNER → BRAKE → TRANSFER → SINK). Keep the mode name ARC.
+- ARC and NET share the same route (EXPRESS → BRAKE → TRANSFER → SINK). Keep the mode name ARC.
 - Deliver the finished file; the user copies it into the game.
 
 ## Setup
@@ -51,7 +54,7 @@ Any `TERMERR` line is a runtime error (the program's top-level pcall hides it ot
 - Phase timeline: `awk 'NR>2 && $2!=p {print; p=$2}' sim_flight.log`
 - Kinematics (pos, vel, nose): `sim_trace.txt`
 - Real flight logs from the user use the same `flight.log` format (see the handoff, section 5).
-- The simulator matches real flights well except at 240 m/s AFTERBURNER; treat high-speed results as approximate.
+- The simulator matches real flights well except at 240 m/s EXPRESS; treat high-speed results as approximate.
 
 ## Current open work
-See section 9 of `ROCKET4_HANDOFF.md`. First priority: analyze the user's next real ARC flight.log (3,000–7,000 blocks), especially AFTERBURNER stability at 200+ m/s and any RECOVER events.
+See section 9 of `ROCKET4_HANDOFF.md`. First priority: analyze the user's next real ARC flight.log (3,000–7,000 blocks), especially EXPRESS stability at 200+ m/s and any RECOVER events.

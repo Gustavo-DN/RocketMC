@@ -28,7 +28,7 @@ Files delivered alongside this doc:
   - E4 `thruster_3` = right (-Z, +X)
   - Body frame: y = nose axis, +Z = front, +X = right. Engines are about 0.5 blocks from the CoM horizontally.
 - Pad: CoM at y ≈ -53.3 when resting. Pad world pose was about (-331.65, -53.36, 44.86) in an early test.
-- The rope net seems to be about Y -51. In a real NET flight the rocket came to rest with CoM at -46.3, i.e. 10 blocks above the -61 the user typed. Touchdown detection handles a wrong target Y.
+- The rope net seems to be about Y -51. In a real NET flight the rocket came to rest with CoM at -46.3, i.e. 10 blocks above the -61 the user typed. Touchdown detection handles a wrong destination Y.
 
 ## 3. Sable / CC:Tweaked API knowledge
 - `sublevel.getLogicalPose()` returns `{position, orientation}`. The quaternion arrives in varying shapes (w,x,y,z / a,v / a,b,c,d / array), so use the `quat()` helper in the code.
@@ -58,33 +58,35 @@ Files delivered alongside this doc:
 - Tail-first upright descent above about 12 m/s gets unstable (the sails want to flip it). Nose-down falling has very weak lateral control, so nose-down drops drift 7–95 blocks.
 
 ## 5. Rocket4.lua architecture
-Modes: SPLASH (nose-first impact into water, PN guidance), ARC, NET. **ARC and NET now fly the same path** (fastest and most accurate in testing); ARC only differs by `ARC_AB_MIN`.
+Modes: WATER (lands nose-first in a water pool, curved-approach steering), ARC, NET. **ARC and NET now fly the same path** (fastest and most accurate in testing); ARC only differs by `ARC_AB_MIN`.
 
-Phases for ARC/NET: IGNITION → BOOST → AFTERBURNER (if distance > AB_MIN/ARC_AB_MIN) → brake (AFTERBURNER tmode BRAKE) → TRANSFER → SINK → RELEASE. Short trips: BOOST → TRANSFER → SINK.
+Renamed in the code and docs (older real flight logs use the old names): SPLASH → WATER, BOOST → ASCENT, AFTERBURNER → EXPRESS (constants keep the `AB_` prefix), IMPACT → TOUCHDOWN. The saved destination file is `rocket.dest` (was `rocket.target`).
+
+Phases for ARC/NET: IGNITION → ASCENT → EXPRESS (if distance > AB_MIN/ARC_AB_MIN) → brake (EXPRESS tmode BRAKE) → TRANSFER → SINK → RELEASE. Short trips: ASCENT → TRANSFER → SINK.
 
 - **IGNITION:** throttle ramps from 0.75 × hover, estimated from mass (`tune()`), until vy > 0.5.
-- **BOOST:** vertical climb to start + CLIMB.
-- **AFTERBURNER** (`levelDir`):
+- **ASCENT:** vertical climb to start + CLIMB.
+- **EXPRESS** (`levelDir`):
   - Carries the climb momentum up with gentle vertical deceleration (AB_VDECEL), then locks altitude `abY` when vy ≤ 0.5.
-  - Altitude hold: desired vertical acceleration = KALT·e − KVY·vy. An integrator adjusts angle of attack from the *measured* vertical acceleration (filtered dv/dt), so it doesn't need a lift model.
-  - Pitch is rate-limited to 15°/s and clamped between -10° and +55°. Lateral heading correction toward the target.
+  - Altitude hold: desired vertical acceleration = KALT·e − KVY·vy. An integrator adjusts pitch angle from the *measured* vertical acceleration (filtered dv/dt), so it doesn't need a lift model.
+  - Pitch is rate-limited to 15°/s and clamped between -10° and +55°. Lateral heading correction toward the destination.
   - Throttle ramps to AB_MAX_THR (1.0) up to AB_VMAX (500).
-- **BRAKE:** velCmd tracks the speed profile sqrt(NET_VMAX² + 2·AB_BRAKE·(dh − handoff)) toward P (climb height), with tilt limited to NET_TILT (30°). If drag slows the rocket below 0.5× the profile while still more than 400 blocks out (AB_REARM), it returns to AFTERBURNER instead of crawling.
-- **TRANSFER:** velCmd toward P at up to NET_VMAX (30). Horizontal gain is gentler near the target (KVEL_MIN) because of gimbal lag. SINK starts at dh < 4 with speed < 4.
-- **SINK:** vertical descent profile (max NET_VDESC 12, NET_SLOW 15 blocks braking zone, NET_SINK 2 m/s at the end, tilt ≤ 6). Release when the tail reaches target + NET_CLEAR, or on touchdown detection (vy ≈ 0 for 1 s within NET_SLOW).
+- **BRAKE:** velCmd tracks the speed profile sqrt(NET_VMAX² + 2·AB_BRAKE·(dh − handoff)) toward P (climb height), with tilt limited to NET_TILT (30°). If drag slows the rocket below 0.5× the profile while still more than 400 blocks out (AB_REARM), it returns to EXPRESS instead of crawling.
+- **TRANSFER:** velCmd toward P at up to NET_VMAX (30). Horizontal gain is gentler near the destination (KVEL_MIN) because of gimbal lag. SINK starts at dh < 4 with speed < 4.
+- **SINK:** vertical descent profile (max NET_VDESC 12, NET_SLOW 15 blocks braking zone, NET_SINK 2 m/s at the end, tilt ≤ 6). Release when the tail reaches destination + NET_CLEAR, or on touchdown detection (vy ≈ 0 for 1 s within NET_SLOW).
 - **Steering (`steer`):**
   - PD + integral (KP 1.5, KD 1.6, ATT_KI 0.8, window 35°). Gains are softened at high throttle (ATT_REF_THR/thr) and scaled by the inertia ratio.
   - Sail feedforward: gimbal term = K·body-lateral velocity / authority. Only up to 25 m/s lateral, and scaled by how sideways the flow is (nose-first flow ⇒ no feedforward; tail-first ⇒ full).
   - A separate SINK_FIX PID is used in SINK.
 - **Roll (`rollCmd`):** rate damping (KD 0.4) + heading hold (KP 0.3) when near upright. Gimbal priority goes to pitch/yaw.
-- **Command smoothing:** turnToward at CMD_RATE 20°/s for TRANSFER, SINK, AFTERBURNER and recovery.
+- **Command smoothing:** turnToward at CMD_RATE 20°/s for TRANSFER, SINK, EXPRESS and recovery.
 - **Steering-thrust floor:** if the nose lags its command by > 20° at > 15 m/s, throttle is raised to ≥ 0.45 (not while climbing upright).
 - **Safety (`safety`):**
-  - Upright phases (IGNITION/BOOST/TRANSFER/SINK): tilt > 45° starts RECOVER.
+  - Upright phases (IGNITION/ASCENT/TRANSFER/SINK): tilt > 45° starts RECOVER.
   - Other phases: attitude error > 60° and not closing for 1 s, or spin > 2.5 rad/s, starts RECOVER.
-  - Engine CUT only when tilt > 60° AND within 20 blocks above the lower of pad/target (the ground-slide failure).
+  - Engine CUT only when tilt > 60° AND within 20 blocks above the lower of pad/destination (the ground-slide failure).
 - **RECOVER (`recoverStep`):** velCmd to hold position and altitude with ≤ 15° tilt. Throttle ≥ 0.9·hover only when not climbing; capped at 0.8·hover when climbing (vy > 3). Exits after 1 s upright, or after 8 s if tilt < 30°.
-- **Ceiling:** if the predicted apex exceeds max(pad, target) + CEILING (700), throttle is capped at 0.1.
+- **Ceiling:** if the predicted apex exceeds max(pad, destination) + CEILING (700), throttle is capped at 0.1.
 - **Keys:** Backspace cuts engines. Ctrl+T or any crash also cuts engines (top-level pcall).
 - **Logs:**
   - `flight.log` columns: `t phase thr speed alt dist dh err_deg gx gy spin tilt roll wy loop_ms`. RECOVER/RESUME/CUT lines are written inline.
@@ -110,24 +112,24 @@ Model (all measured values above):
 - sail torque K·lateral velocity, capped TQMAX (1.2 rad/s²)
 - lateral drag KLAT·v_lat capped LATMAX (12 m/s²); axial drag 0.12
 - gravity 10.5
-- net floor at target (TY -58, ±8 blocks), pad floor -53.3
+- net floor at destination (TY -58, ±8 blocks), pad floor -53.3
 
 Env overrides: KAERO, KLAT, LATMAX, TQMAX, CAX, TX, TZ, MODE, TMAX.
 
-Calibration check: the simulator reproduced the old AFTERBURNER wobble (tilt 30–87°), the SPIN crash of the lift-model version, the old NET hover oscillation, and the old TRANSFER crawl. Not exact at 240 m/s.
+Calibration check: the simulator reproduced the old EXPRESS wobble (tilt 30–87°), the SPIN crash of the lift-model version, the old NET hover oscillation, and the old TRANSFER crawl. Not exact at 240 m/s.
 
-Test matrix (last results): 16 ARC flights (200–12,000 blocks, KAERO 0.015–0.045, KLAT 0.7–1.0, LATMAX 16–25, TQMAX 1.8) all land. 15 were within 1.4 blocks, the worst 2.8. Times: 400 blocks ≈ 75 s, 7,000 ≈ 111 s, 12,000 ≈ 130 s. NET: 0.2–0.4 blocks. SPLASH: 12–56 blocks (not tuned this session).
+Test matrix (last results): 16 ARC flights (200–12,000 blocks, KAERO 0.015–0.045, KLAT 0.7–1.0, LATMAX 16–25, TQMAX 1.8) all land. 15 were within 1.4 blocks, the worst 2.8. Times: 400 blocks ≈ 75 s, 7,000 ≈ 111 s, 12,000 ≈ 130 s. NET: 0.2–0.4 blocks. WATER: 12–56 blocks (not tuned this session).
 
 Always re-run the NET + ARC matrix after edits. The regression test caught a real bug: an empty `if g.phase == "SINK" then elseif ...` branch.
 
 ## 7. Real flight history (rocket.log)
 - NET 1000: CUT TILT at 250 blocks. Sails tipped the rocket over at 40° tilt, and the P-only attitude loop allowed it. This led to the integral term, RECOVER, and the ground-only cut.
 - NET -300: landed 1.9 blocks off after 140 s of hovering and oscillating (position loop too fast versus gimbal lag). The user slowed it with a creative staff.
-- NET 500: 1.0 blocks, perfect, after gentler near-target gains and touchdown detection.
+- NET 500: 1.0 blocks, perfect, after gentler near-destination gains and touchdown detection.
 - ARC 7000 (old ARC): 0.5 blocks but 239 s. Braked about 2,800 blocks out, then crawled 1,170 blocks at 8.8 m/s.
 - AB_VMAX raised to 500 by the user. The rocket reached 245 m/s.
 - Pop-up ARC attempt: RECOVER SPIN at 188 m/s, then recovery forced 0.93 throttle nose-up and climbed to Y 6109 (aborted). Two causes: the high-speed sail feedforward overcompensated, and recovery added climbing thrust. Both are fixed.
-- AFTERBURNER wobble: tilt 33–110° at 216–245 m/s, the altitude loop limit-cycling against slow attitude. Rewritten.
+- EXPRESS wobble: tilt 33–110° at 216–245 m/s, the altitude loop limit-cycling against slow attitude. Rewritten.
 
 ## 8. Design lessons (don't repeat)
 - Cutting engines at altitude = guaranteed crash. Only cut near the ground.
@@ -141,11 +143,11 @@ Always re-run the NET + ARC matrix after edits. The regression test caught a rea
 
 ## 9. Open items / next steps
 1. Real test of the new build: ARC 3,000–7,000 blocks, then check flight.log (RECOVER lines should end in RESUME).
-2. AFTERBURNER at 240 m/s is the least certain part. If it wobbles, lower AB_KA or AB_PITCH_RATE, or cap AB_VMAX.
+2. EXPRESS at 240 m/s is the least certain part. If it wobbles, lower AB_KA or AB_PITCH_RATE, or cap AB_VMAX.
 3. Verify the net Y and TAIL_OFFSET/NOSE_OFFSET with F3.
 4. Cargo mass: `tune()` rescales thrust and gains from getMass/getInertiaTensor. Untested with a full silo.
 5. The `front` vessel isn't feeding the engines (needs a modem).
-6. SPLASH mode wasn't retuned for the new rocket.
+6. WATER mode wasn't retuned for the new rocket.
 7. Mission Control supports only one global program per /settings. ALTO (drop from a carrier ship) mode is planned, not started.
 8. User preference: a rocket that looks like an arc and is fast. The user accepted that ARC now shares NET's route.
 
