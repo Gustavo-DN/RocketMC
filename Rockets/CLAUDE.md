@@ -1,7 +1,7 @@
 # CLAUDE.md: Rocket4 (CC:Tweaked rocket for Minecraft Create Aeronautics / Sable)
 
 Minecraft-only project: a 4-thruster cargo rocket flown by a CC:Tweaked computer.
-It is a video-game delivery vehicle. It carries items (food that spoils) between bases in a Minecraft world and lands softly on a rope net or in a water pool. Nothing here relates to real-world hardware.
+It is a video-game delivery vehicle. It carries items (food that spoils) between bases in a Minecraft world and arrives on a rope net (upright in NET mode, nose-down in ARC mode) or in a water pool. Nothing here relates to real-world hardware.
 
 Naming: the destination is where the cargo lands. Phases are IGNITION, ASCENT, EXPRESS (fast level cruise; its constants use the `AB_` prefix), TRANSFER, SINK, DIVE, RELEASE. Delivery modes are WATER, ARC and NET.
 Read `ROCKET4_HANDOFF.md` first. It has all hardware facts, measured physics, API quirks, the code architecture, the flight history and the rejected designs.
