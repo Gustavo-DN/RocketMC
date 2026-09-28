@@ -56,15 +56,21 @@ local function phys(dt)
   S.maxY = math.max(S.maxY or -999, S.pos.y)
   S.maxV = math.max(S.maxV or 0, math.sqrt(S.vel.x^2 + S.vel.y^2 + S.vel.z^2))
   S.pos.x, S.pos.y, S.pos.z = S.pos.x + S.vel.x * dt, S.pos.y + S.vel.y * dt, S.pos.z + S.vel.z * dt
-  local floor = PAD
-  if math.abs(S.pos.x - TX) < 8 and math.abs(S.pos.z - TZ) < 8 then floor = TY + 4.8 end
   local nose = qrot(S.q, { x = 0, y = 1, z = 0 })
+  local floor = PAD
+  if math.abs(S.pos.x - TX) < 8 and math.abs(S.pos.z - TZ) < 8 then floor = TY + math.max(4.8 * nose.y, -12.7 * nose.y) end
   local tilt = math.deg(math.acos(math.max(-1, math.min(1, nose.y))))
   if S.pos.y - floor < 15 and T > 20 then S.maxTiltLow = math.max(S.maxTiltLow, tilt) end
   if S.pos.y < floor then
     S.pos.y = floor
+    if not S.landed and T > 20 then
+      local tip = nose.y < 0 and 12.7 or -4.8
+      S.impV = math.sqrt(S.vel.x^2 + S.vel.y^2 + S.vel.z^2)
+      S.tipMiss = math.sqrt((S.pos.x + nose.x * tip - TX)^2 + (S.pos.z + nose.z * tip - TZ)^2)
+      S.landTilt = math.deg(math.acos(math.max(-1, math.min(1, nose.y))))
+    end
     if S.vel.y < 0 then S.vel = { x = 0, y = 0, z = 0 } S.om = { x = S.om.x * 0.5, y = 0, z = S.om.z * 0.5 } end
-    S.landed = S.landed or T
+    if T > 20 then S.landed = S.landed or T end
   end
 end
 local TR = io.open("sim_trace.txt", "w")
@@ -125,6 +131,6 @@ local REMOTE = { mission = { mode = os.getenv("MODE") or "NET", x = TX, y = TY, 
   result = function(r, sp, t) RESULT = { r = r, sp = sp, t = t } end }
 local ok, err = pcall(loadfile(arg[1]), REMOTE)
 local nose = qrot(S.q, { x = 0, y = 1, z = 0 })
-print(string.format("%s  ok=%s %s  landed_t=%s  end_t=%.1f  pos=(%.1f, %.2f, %.1f) miss_xz=%.1f tilt_end=%.1f maxTiltLow=%.1f maxY=%.0f maxV=%.0f",
+print(string.format("%s  ok=%s %s  landed_t=%s  end_t=%.1f  pos=(%.1f, %.2f, %.1f) miss_xz=%.1f tilt_end=%.1f maxTiltLow=%.1f maxY=%.0f maxV=%.0f tip_xz=%.1f impV=%.0f landTilt=%.0f",
   arg[1], tostring(ok), ok and "" or tostring(err), tostring(S.landed and math.floor(S.landed)), T, S.pos.x, S.pos.y, S.pos.z,
-  math.sqrt((S.pos.x - TX)^2 + (S.pos.z - TZ)^2), math.deg(math.acos(nose.y)), S.maxTiltLow, S.maxY or 0, S.maxV or 0))
+  math.sqrt((S.pos.x - TX)^2 + (S.pos.z - TZ)^2), math.deg(math.acos(nose.y)), S.maxTiltLow, S.maxY or 0, S.maxV or 0, S.tipMiss or -1, S.impV or -1, S.landTilt or -1))
