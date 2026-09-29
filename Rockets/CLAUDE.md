@@ -11,6 +11,7 @@ Read `ROCKET4_HANDOFF.md` first. It has all hardware facts, measured physics, AP
 - `VectorMap.lua`: thruster mapping test (already run).
 - `sim4.lua`: offline simulator; loads Rocket4.lua with stubbed CC/Sable APIs.
 - `ROCKET4_HANDOFF.md`: full knowledge base.
+- `SpeedTest.lua`: separate test program. `SpeedTest <x> <z> [NET|ARC] [climb]` runs Rocket4 unchanged on a REMOTE mission and only listens to its thruster commands and sub-level reads (no extra peripheral calls). It writes `speedtest.log`: a summary of the level full-throttle cruise (max speed, time to 100–280 m/s, altitude swing, pitch wobble, nose vs flight path, spin, gimbal use, throttle, recoveries, fuel), then 0.25 s rows. Rocket4 must not depend on it.
 
 ## Hard rules for Rocket4.lua
 - Lua 5.1 (CC:Tweaked CraftOS 1.9). No comments, no `print()`. Clean code.
