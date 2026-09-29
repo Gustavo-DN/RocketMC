@@ -132,6 +132,21 @@ local C = {
   AB_BRAKE = 7,
   AB_REARM_D = 400,
   AB_REARM_K = 0.5,
+  BRAKE_STYLE = "TILT",
+  COAST_K = 0.06,
+  COAST_KT = 0.5,
+  COAST_MIN_THR = 0.14,
+  FLIP_BRAKE = 18,
+  FLIP_V = 130,
+  FLIP_MIN_ACC = 8,
+  FLIP_AMAX = 28,
+  FLIP_KV = 0.8,
+  FLIP_DRAG = 0.085,
+  FLIP_TURN_T = 2.5,
+  FLIP_PAD = 60,
+  FLIP_RATE = 60,
+  FLIP_TURN_ERR = 30,
+  FLIP_TURN_THR = 1.0,
   WATER_FAST_THR = 1.0,
   WATER_SLOW_DIST = 300,
   WATER_RAMP = 0.3,
@@ -495,6 +510,45 @@ local function arcDir(g, pos, vel)
   return add(mul(vu, math.sqrt(1 - sn * sn)), mul(fn, sn / fnl))
 end
 
+local function flipDist(v, vEnd)
+  return math.max(v * v - vEnd * vEnd, 0) / (2 * C.FLIP_BRAKE) + v * C.FLIP_TURN_T + C.FLIP_PAD
+end
+
+local function brakeProf(d, vEnd)
+  d = math.max(d, 0)
+  if C.BRAKE_STYLE == "COAST" then return vEnd + C.COAST_K * d end
+  if C.BRAKE_STYLE == "FLIP" then return C.FLIP_V + C.COAST_K * math.max(d - flipDist(C.FLIP_V, vEnd), 0) end
+  return math.sqrt(vEnd * vEnd + 2 * C.AB_BRAKE * d)
+end
+
+local function brakeDist(v, vEnd)
+  if C.BRAKE_STYLE == "COAST" then return math.max(v - vEnd, 0) / C.COAST_K + C.AB_PAD end
+  if C.BRAKE_STYLE == "FLIP" then return math.max(v - C.FLIP_V, 0) / C.COAST_K + flipDist(math.min(v, C.FLIP_V), vEnd) + C.AB_PAD end
+  return math.max(v * v - vEnd * vEnd, 0) / (2 * C.AB_BRAKE) + C.AB_PAD
+end
+
+local function flipDir(g, pos, vel, hx, hz, dh, rem, vEnd)
+  local sp = math.sqrt(vEnd * vEnd + 2 * C.FLIP_BRAKE * math.max(rem, 0))
+  local ux, uz = hx / dh, hz / dh
+  local ff = sp > vEnd + 1 and C.FLIP_BRAKE or 0
+  local ax = (ux * sp - vel.x) * C.FLIP_KV - ux * ff + C.FLIP_DRAG * vel.x
+  local az = (uz * sp - vel.z) * C.FLIP_KV - uz * ff + C.FLIP_DRAG * vel.z
+  local vh = math.sqrt(vel.x * vel.x + vel.z * vel.z)
+  if vh > vEnd + 5 then
+    local along = (ax * vel.x + az * vel.z) / vh
+    if along > -C.FLIP_MIN_ACC then
+      local k = -C.FLIP_MIN_ACC - along
+      ax, az = ax + k * vel.x / vh, az + k * vel.z / vh
+    end
+  end
+  local ah = math.sqrt(ax * ax + az * az)
+  if ah > C.FLIP_AMAX then ax, az = ax * C.FLIP_AMAX / ah, az * C.FLIP_AMAX / ah end
+  local ay = (clamp((g.P.y - pos.y) * 0.5, -10, 10) - vel.y) * C.NET_KVEL + C.GRAV
+  local a = { x = ax, y = math.max(ay, 0.3 * C.GRAV), z = az }
+  g.throttle = clamp(len(a) / C.THRUST_ACC, C.NET_MIN_THR, C.AB_MAX_THR)
+  return unit(a)
+end
+
 local function levelDir(g, pos, vel, fx, fz, dt)
   dt = dt or 0.05
   local T = math.max(g.throttle, 0.05) * C.THRUST_ACC
@@ -578,14 +632,21 @@ local function guideStep(g, pos, vel, nose, dt)
     local handoff = arc and C.DIVE_V * C.DIVE_V / (2 * C.DIVE_AH) + C.DIVE_R * math.max(pos.y - tgt.y - C.NOSE_OFFSET, 0) or C.NET_VMAX * C.NET_VMAX / (2 * C.NET_ABRAKE) + C.AB_MARGIN
     local v = len(vel)
     if g.tmode == "BRAKE" and dh - handoff > C.AB_REARM_D then
-      local sp0 = math.sqrt(vEnd * vEnd + 2 * C.AB_BRAKE * math.max(dh - handoff, 0))
-      if v < C.AB_REARM_K * sp0 then g.tmode = "AB" end
+      if v < C.AB_REARM_K * brakeProf(dh - handoff, vEnd) then g.tmode = "AB" end
     end
     if dh <= handoff or (g.tmode == "BRAKE" and v <= vEnd + 5 and dh - handoff <= C.AB_REARM_D) then
       g.phase, g.tmode, g.bias = arc and "DIVE" or "TRANSFER", arc and "DIVE" or "AUTO", 0
-    elseif g.tmode == "BRAKE" or (dh - handoff) <= math.max(v * v - vEnd * vEnd, 0) / (2 * C.AB_BRAKE) + C.AB_PAD then
+    elseif g.tmode == "BRAKE" or (dh - handoff) <= brakeDist(v, vEnd) then
       g.tmode = "BRAKE"
-      local sp = math.min(C.AB_VMAX, math.sqrt(vEnd * vEnd + 2 * C.AB_BRAKE * math.max(dh - handoff, 0)))
+      if C.BRAKE_STYLE == "FLIP" and (v <= C.FLIP_V + 5 or dh - handoff <= flipDist(v, vEnd)) then
+        g.phase, g.tmode = "FLIP", "FLIP"
+        return flipDir(g, pos, vel, hx, hz, dh, dh - handoff, vEnd)
+      end
+      if C.BRAKE_STYLE ~= "TILT" then
+        g.throttle = clamp(C.COAST_MIN_THR + C.COAST_KT * (brakeProf(dh - handoff, vEnd) - v) / C.THRUST_ACC, C.COAST_MIN_THR, C.AB_MAX_THR)
+        return levelDir(g, pos, vel, hx / dh, hz / dh, dt)
+      end
+      local sp = math.min(C.AB_VMAX, brakeProf(dh - handoff, vEnd))
       return velCmd(g, { x = hx / dh * sp, y = clamp((g.P.y - pos.y) * 0.5, -10, 10), z = hz / dh * sp }, vel, nose, dt, C.NET_TILT, C.AB_MAX_THR, true)
     else
       g.tmode = "AB"
@@ -596,6 +657,18 @@ local function guideStep(g, pos, vel, nose, dt)
         g.throttle = math.max(g.throttle - 1.5 * dt, abFloor)
       end
       return levelDir(g, pos, vel, hx / dh, hz / dh, dt)
+    end
+  end
+  if g.phase == "FLIP" then
+    local hx, hz = tgt.x - pos.x, tgt.z - pos.z
+    local dh = math.max(math.sqrt(hx * hx + hz * hz), 1e-6)
+    local arc = g.mode == "ARC"
+    local vEnd = arc and C.DIVE_V or C.NET_VMAX
+    local handoff = arc and C.DIVE_V * C.DIVE_V / (2 * C.DIVE_AH) + C.DIVE_R * math.max(pos.y - tgt.y - C.NOSE_OFFSET, 0) or C.NET_VMAX * C.NET_VMAX / (2 * C.NET_ABRAKE) + C.AB_MARGIN
+    if dh <= handoff or len(vel) <= vEnd + 5 then
+      g.phase, g.tmode, g.bias = arc and "DIVE" or "TRANSFER", arc and "DIVE" or "AUTO", 0
+    else
+      return flipDir(g, pos, vel, hx, hz, dh, dh - handoff, vEnd)
     end
   end
   if g.phase == "DIVE" then
@@ -1211,7 +1284,7 @@ local function safety(g, pos, nose, dir, om, dt, now)
   if g.rec or g.phase == "IGNITION" then return nil end
   local why
   if up then
-    local grace = g.safeFrom == "EXPRESS" and C.CUT_GRACE or 0
+    local grace = (g.safeFrom == "EXPRESS" or g.safeFrom == "FLIP") and C.CUT_GRACE or 0
     if tilt > C.REC_TILT and now - g.safeT >= grace then why = "TILT" end
   elseif dir then
     if g.errPrev then g.closing = g.closing + ((g.errPrev - err) / dt - g.closing) * 0.2 end
@@ -1230,7 +1303,7 @@ local function recoverStep(g, pos, vel, nose, om, dt)
     g.recOk = g.recOk + dt
     if g.recOk >= C.REC_HOLD then
       g.rec = false
-      if g.phase == "EXPRESS" or g.phase == "DIVE" then g.phase, g.tmode, g.bias = "TRANSFER", "AUTO", 0 end
+      if g.phase == "EXPRESS" or g.phase == "DIVE" or g.phase == "FLIP" then g.phase, g.tmode, g.bias = "TRANSFER", "AUTO", 0 end
       return nil
     end
   else
@@ -1245,7 +1318,7 @@ end
 
 local function drawFlight(start, tgt)
   clear()
-  local colorsFor = { IGNITION = colors.yellow, ASCENT = colors.orange, CRUISE = colors.cyan, TRANSFER = colors.cyan, EXPRESS = colors.red, DIVE = colors.magenta, SINK = colors.lightBlue, RELEASE = colors.lime, TOUCHDOWN = colors.red, CUT = colors.red, ABORT = colors.red, RECOVER = colors.orange }
+  local colorsFor = { IGNITION = colors.yellow, ASCENT = colors.orange, CRUISE = colors.cyan, TRANSFER = colors.cyan, EXPRESS = colors.red, DIVE = colors.magenta, FLIP = colors.orange, SINK = colors.lightBlue, RELEASE = colors.lime, TOUCHDOWN = colors.red, CUT = colors.red, ABORT = colors.red, RECOVER = colors.orange }
   header(fl.phase .. (fl.cut and (" " .. fl.cut) or "") .. " ", colorsFor[fl.phase] or colors.white)
   local p = fl.pos
   text(2, 3, "FLIGHT " .. mode, colors.yellow)
@@ -1302,7 +1375,7 @@ local function flight(tgt, pred)
       wff = toBody(w, u, m > C.DIVE_WFF_MAX and mul(g.wff, C.DIVE_WFF_MAX / m) or g.wff)
     end
     g.dPrev = g.phase == "DIVE" and d or nil
-    fl.gx, fl.gy = steer(dirW, w, u, om, dt, g.throttle, C.NET_ATT_BOOST and mode ~= "WATER" and (g.phase == "TRANSFER" or g.phase == "SINK"), sinking, g.phase == "EXPRESS" or g.phase == "DIVE", vel, wff)
+    fl.gx, fl.gy = steer(dirW, w, u, om, dt, g.throttle, C.NET_ATT_BOOST and mode ~= "WATER" and (g.phase == "TRANSFER" or g.phase == "SINK"), sinking, g.phase == "EXPRESS" or g.phase == "DIVE" or g.phase == "FLIP", vel, wff)
   end
   local function guide()
     local t0 = os.clock()
@@ -1342,8 +1415,8 @@ local function flight(tgt, pred)
           if g.abLock and g.abY > ceil - 50 then g.abY = ceil - 50 end
         end
       end
-      if dir and not done and (g.rec or g.phase == "TRANSFER" or g.phase == "SINK" or g.phase == "EXPRESS") then
-        g.cmdS = turnToward(g.cmdS or nose, unit(dir), math.rad(C.CMD_RATE) * dt)
+      if dir and not done and (g.rec or g.phase == "TRANSFER" or g.phase == "SINK" or g.phase == "EXPRESS" or g.phase == "FLIP") then
+        g.cmdS = turnToward(g.cmdS or nose, unit(dir), math.rad(g.phase == "FLIP" and not g.rec and C.FLIP_RATE or C.CMD_RATE) * dt)
         dir = g.cmdS
       else
         g.cmdS = nil
@@ -1416,9 +1489,10 @@ local function flight(tgt, pred)
       else
         fl.gx, fl.gy, fl.r = 0, 0, 0
       end
-      if dir and (g.rec or g.phase == "EXPRESS" or g.phase == "TRANSFER" or g.phase == "DIVE") and (fl.err or 0) > C.AUTH_ERR and len(vel) > C.AUTH_V and not (vel.y > C.REC_CLIMB_V and nose.y > 0.7) then
+      if dir and (g.rec or g.phase == "EXPRESS" or g.phase == "TRANSFER" or g.phase == "DIVE" or g.phase == "FLIP") and (fl.err or 0) > C.AUTH_ERR and len(vel) > C.AUTH_V and not (vel.y > C.REC_CLIMB_V and nose.y > 0.7) then
         g.throttle = math.max(g.throttle, C.AUTH_THR)
       end
+      if dir and g.phase == "FLIP" and not g.rec and (fl.err or 0) > C.FLIP_TURN_ERR then g.throttle = math.max(g.throttle, C.FLIP_TURN_THR) end
       E.set(g.throttle, fl.gx, fl.gy, fl.r)
       pos, w, u, vel, om = E.io(true)
     end
