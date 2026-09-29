@@ -11,6 +11,7 @@ Read `ROCKET4_HANDOFF.md` first. It has all hardware facts, measured physics, AP
 - `VectorMap.lua`: thruster mapping test (already run).
 - `sim4.lua`: offline simulator; loads Rocket4.lua with stubbed CC/Sable APIs.
 - `ROCKET4_HANDOFF.md`: full knowledge base.
+- `speedtest.log` (written by Rocket4 in game): speed and stability report for the full-throttle EXPRESS cruise (max speed, time to 100/150/200/240 m/s, altitude hold, pitch range, attitude error, gimbal saturation, spin, throttle, recoveries, fuel), then 0.25 s rows. It ends when braking or the ARC descent starts. Flight behavior is unchanged by it.
 
 ## Hard rules for Rocket4.lua
 - Lua 5.1 (CC:Tweaked CraftOS 1.9). No comments, no `print()`. Clean code.

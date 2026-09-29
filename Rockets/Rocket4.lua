@@ -194,6 +194,7 @@ local C = {
   SAVE = "rocket.dest",
   LOG = "rocket.log",
   FLIGHT_LOG = "flight.log",
+  SPEED_LOG = "speedtest.log",
   MODES = { "WATER", "ARC", "NET" },
 }
 local climb = C.CLIMB
@@ -1372,6 +1373,75 @@ local function writeLog(tgt, r, speed, t, tag)
   f.close()
 end
 
+local function speedNew()
+  return { on = false, done = false, n = 0, vmax = 0, tmax = 0, marks = {}, e2 = 0, emax = 0, sat = 0, spin = 0, d2 = 0, dn = 0, dmax = 0, pmin = 90, pmax = -90, rec = 0, thr = 0, ts = {}, vs = {}, rows = {} }
+end
+
+local function speedFinish(sp, why)
+  if not sp.on or sp.done then return end
+  sp.done = true
+  local f = fs.open(C.SPEED_LOG, "w")
+  if not f then return end
+  local dur = sp.tl - sp.t0
+  local sum, k = 0, 0
+  for i = 1, #sp.ts do
+    if sp.ts[i] >= sp.tl - 10 then sum, k = sum + sp.vs[i], k + 1 end
+  end
+  local function mark(v) return sp.marks[v] and string.format("%.1f s", sp.marks[v]) or "--" end
+  local used = (sp.tank0 and tel.tank) and (sp.tank0 - tel.tank) + ((sp.eng0 or 0) - (tel.eng or 0)) or nil
+  f.writeLine(string.format("SPEED TEST %s  MASS %.1f  TACC %.1f  CLIMB %d", mode, E.mass or 0, C.THRUST_ACC, climb))
+  f.writeLine(string.format("ENDED BY      %s", why))
+  f.writeLine(string.format("DURATION      %.1f s  DISTANCE %.0f blocks", dur, sp.dist or 0))
+  f.writeLine(string.format("MAX SPEED     %.1f m/s at %.1f s", sp.vmax, sp.tmax))
+  f.writeLine(string.format("LAST 10 S AVG %.1f m/s", k > 0 and sum / k or 0))
+  f.writeLine(string.format("TIME TO       100: %s  150: %s  200: %s  240: %s", mark(100), mark(150), mark(200), mark(240)))
+  f.writeLine(string.format("ALT HOLD      RMS %.1f  MAX %.1f blocks (hold Y %s)", sp.dn > 0 and math.sqrt(sp.d2 / sp.dn) or 0, sp.dmax, sp.holdY and string.format("%.0f", sp.holdY) or "--"))
+  f.writeLine(string.format("PITCH         %.1f to %.1f deg", sp.pmin, sp.pmax))
+  f.writeLine(string.format("ATTITUDE ERR  RMS %.1f  MAX %.1f deg", sp.n > 0 and math.sqrt(sp.e2 / sp.n) or 0, sp.emax))
+  f.writeLine(string.format("GIMBAL SAT    %.0f %% of samples", sp.n > 0 and 100 * sp.sat / sp.n or 0))
+  f.writeLine(string.format("MAX SPIN      %.2f rad/s", sp.spin))
+  f.writeLine(string.format("AVG THROTTLE  %.2f", sp.n > 0 and sp.thr / sp.n or 0))
+  f.writeLine(string.format("RECOVERIES    %d", sp.rec))
+  f.writeLine(used and string.format("FUEL USED     %.0f mB (%.1f mB/s)", used, dur > 0 and used / dur or 0) or "FUEL USED     --")
+  f.writeLine("")
+  f.writeLine("t speed alt dalt pitch err gx gy spin thr")
+  for i = 1, #sp.rows do f.writeLine(sp.rows[i]) end
+  f.close()
+end
+
+local function speedSample(sp, g, t, pos, vel, nose, om, row)
+  local cruising = g.phase == "EXPRESS" and g.tmode ~= "BRAKE"
+  if sp.done then return end
+  if not sp.on then
+    if not cruising or g.rec then return end
+    sp.on, sp.t0, sp.p0, sp.tank0, sp.eng0 = true, t, pos, tel.tank, tel.eng
+  end
+  if not cruising and not g.rec then return speedFinish(sp, g.phase .. (g.tmode and (" " .. g.tmode) or "")) end
+  local v = len(vel)
+  sp.tl = t
+  sp.dist = math.sqrt((pos.x - sp.p0.x) ^ 2 + (pos.z - sp.p0.z) ^ 2)
+  if g.rec and not sp.inRec then sp.rec = sp.rec + 1 end
+  sp.inRec = g.rec
+  if not row then return end
+  if v > sp.vmax then sp.vmax, sp.tmax = v, t - sp.t0 end
+  for _, m in ipairs({ 100, 150, 200, 240 }) do
+    if v >= m and not sp.marks[m] then sp.marks[m] = t - sp.t0 end
+  end
+  local dAlt = 0
+  local pitch = math.deg(math.asin(clamp(nose.y, -1, 1)))
+  if g.abLock and g.abY then
+    dAlt = pos.y - g.abY
+    sp.holdY, sp.d2, sp.dn, sp.dmax = g.abY, sp.d2 + dAlt * dAlt, sp.dn + 1, math.max(sp.dmax, math.abs(dAlt))
+    sp.pmin, sp.pmax = math.min(sp.pmin, pitch), math.max(sp.pmax, pitch)
+  end
+  local e = fl.err or 0
+  sp.n, sp.e2, sp.emax = sp.n + 1, sp.e2 + e * e, math.max(sp.emax, e)
+  if math.max(math.abs(fl.gx or 0), math.abs(fl.gy or 0)) >= 0.99 then sp.sat = sp.sat + 1 end
+  sp.spin, sp.thr = math.max(sp.spin, len(om)), sp.thr + g.throttle
+  sp.ts[#sp.ts + 1], sp.vs[#sp.vs + 1] = t, v
+  sp.rows[#sp.rows + 1] = string.format("%.2f %.1f %.1f %+.1f %+.1f %.1f %+.2f %+.2f %.2f %.2f", t - sp.t0, v, pos.y, dAlt, pitch, e, fl.gx or 0, fl.gy or 0, len(om), g.throttle)
+end
+
 local function flight(tgt, pred)
   local start, sw, su = E.io(false)
   E.psi0 = heading(sw, su)
@@ -1398,6 +1468,7 @@ local function flight(tgt, pred)
   local function guide()
     local t0 = os.clock()
     local last, nextTrail, nextLog = t0, t0, t0
+    local sp = speedNew()
     local flog = fs.open(C.FLIGHT_LOG, "w")
     if flog then
       flog.writeLine(string.format("%s TGT %d %d %d CLIMB %d MASS %.1f TACC %.1f HOVER %.3f", mode, math.floor(tgt.x), math.floor(tgt.y), math.floor(tgt.z), climb, E.mass or 0, C.THRUST_ACC, E.hover or 0))
@@ -1414,6 +1485,7 @@ local function flight(tgt, pred)
         end
         E.cut()
         fl.thr, fl.gx, fl.gy, fl.r, fl.phase = 0, 0, 0, 0, "ABORT"
+        speedFinish(sp, "ABORT")
         return
       end
       local now = os.clock()
@@ -1460,6 +1532,7 @@ local function flight(tgt, pred)
         fl.trail[#fl.trail + 1] = pos
         nextTrail = now + 0.25
       end
+      speedSample(sp, g, now - t0, pos, vel, nose, om, now >= nextLog)
       if flog and now >= nextLog then
         local dhx, dhz = tgt.x - pos.x, tgt.z - pos.z
         flog.writeLine(string.format("%.2f %s %.2f %.1f %.1f %.1f %.1f %.1f %+.2f %+.2f %.2f %.1f %+.2f %+.2f %d",
@@ -1469,6 +1542,7 @@ local function flight(tgt, pred)
         nextLog = now + C.LOG_DT
       end
       if done then
+        speedFinish(sp, fl.cut and ("CUT " .. fl.cut) or g.phase)
         if flog then
           if fl.cut then flog.writeLine("CUT " .. fl.cut) end
           flog.close()
