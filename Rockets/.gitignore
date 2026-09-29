@@ -3,3 +3,5 @@ sim_rocket.log
 sim_trace.txt
 luac.out
 sim_speedtest.log
+sim_flighttest.log
+sim_flighttest.txt

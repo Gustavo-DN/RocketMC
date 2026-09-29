@@ -50,8 +50,13 @@ local function phys(dt)
   local lx_, lz_ = -KL * bv.x, -KL * bv.z
   local lm = math.sqrt(lx_ * lx_ + lz_ * lz_)
   if lm > LM then lx_, lz_ = lx_ * LM / lm, lz_ * LM / lm end
-  fx, fy, fz = fx + lx_, fy - tonumber(os.getenv("CAX") or 0.12) * bv.y, fz + lz_
+  local VD = os.getenv("VDRAG")
+  fx, fy, fz = fx + lx_, fy - (VD and 0 or tonumber(os.getenv("CAX") or 0.12) * bv.y), fz + lz_
   local fw = qrot(S.q, { x = fx, y = fy, z = fz })
+  if VD then
+    local cax = tonumber(os.getenv("CAX") or 0.12)
+    fw = { x = fw.x - cax * S.vel.x, y = fw.y - cax * S.vel.y, z = fw.z - cax * S.vel.z }
+  end
   S.vel.x = S.vel.x + fw.x * dt
   S.vel.y = S.vel.y + (fw.y - 10.5) * dt
   S.vel.z = S.vel.z + fw.z * dt

@@ -11,6 +11,8 @@ Read `ROCKET4_HANDOFF.md` first. It has all hardware facts, measured physics, AP
 - `VectorMap.lua`: thruster mapping test (already run).
 - `sim4.lua`: offline simulator; loads Rocket4.lua with stubbed CC/Sable APIs.
 - `ROCKET4_HANDOFF.md`: full knowledge base.
+- `FlightTest.lua`: standalone automatic test flight (own copy of the steering, no dependency on Rocket4): climb 200, level off, full-throttle cruise with thrust-based altitude hold (pitch = asin((g + a)/T)) until speed plateaus, 2 rad/s roll test, climb to +550, 5° and 0° pitch runs, steep pull-up, coast, upright descent and landing. Writes `flighttest.log` (0.25 s rows) and `flighttest.txt` (per-stage summary).
+- Real speed test (2026-09-29): max 317 m/s, pitch wobble ±30° around ~21° nose-up, gimbal RMS 0.06. Measured lift is only 0–2 m/s² even at 270 m/s and 60° angle of attack, so thrust carries the weight (~20° nose-up at full throttle). `sim4.lua` with `VDRAG=1 CAX=0.088 LATMAX=3 TQMAX=0.5` (drag along velocity, weak lift and sail torque) reproduces that test.
 - `SpeedTest.lua`: separate test program. `SpeedTest <x> <z> [NET|ARC] [climb]` runs Rocket4 unchanged on a REMOTE mission and only listens to its thruster commands and sub-level reads (no extra peripheral calls). It writes `speedtest.log`: a summary of the level full-throttle cruise (max speed, time to 100–280 m/s, altitude swing, pitch wobble, nose vs flight path, spin, gimbal use, throttle, recoveries, fuel), then 0.25 s rows. Rocket4 must not depend on it.
 
 ## Hard rules for Rocket4.lua
