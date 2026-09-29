@@ -18,7 +18,6 @@ local C = {
   ROLL_KD = 0.4,
   ROLL_MAX = 0.4,
   CLIMB = 200,
-  HIGH = 550,
   FLOOR = 120,
   PITCH_RATE = 15,
   PULL_RATE = 10,
@@ -26,7 +25,6 @@ local C = {
   KALT = 0.05,
   KVY = 0.4,
   AMAX = 3,
-  AMAX_REC = 12,
   BIAS_KI = 0.01,
   BIAS_MAX = 12,
   PITCH_CAP = 60,
@@ -34,13 +32,12 @@ local C = {
   PLATEAU_WIN = 6,
   PLATEAU_DV = 1.5,
   CRUISE_MAX_T = 120,
-  ROLL_RATE = 2.0,
-  ROLL_ON = 4,
-  ROLL_T = 10,
-  CLIMB_MAX_T = 90,
-  LEVEL_T = 15,
-  LEVEL_MIN = 330,
-  LEVEL_SINK = 40,
+  FLIP_THR = 0.6,
+  FLIP_RATE = 90,
+  FLIP_END = 160,
+  FLIP_OK = 20,
+  FLIP_MAX_T = 10,
+  RETRO_END_V = 20,
   PULL_PITCH = 85,
   PULL_GAMMA = 45,
   PULL_MAX_T = 20,
@@ -196,7 +193,7 @@ local function writeSummary(extra)
 end
 
 local function stageStart(name, t, pos, v)
-  stats = { name = name, t0 = t, alt0 = pos.y, v0 = v, vmax = v, n = 0, p1 = 0, p2 = 0, aoa = 0, rollMax = 0, spinMax = 0, g2 = 0, sat = 0, vyMin = 0, vyMax = 0 }
+  stats = { name = name, t0 = t, x0 = pos.x, z0 = pos.z, alt0 = pos.y, v0 = v, vmax = v, n = 0, p1 = 0, p2 = 0, aoa = 0, rollMax = 0, spinMax = 0, g2 = 0, sat = 0, vyMin = 0, vyMax = 0 }
 end
 
 local function stageEnd(t, pos, v)
@@ -204,8 +201,8 @@ local function stageEnd(t, pos, v)
   local s, n = stats, math.max(stats.n, 1)
   local dur = t - s.t0
   local pm = s.p1 / n
-  summary[#summary + 1] = string.format("%-8s %5.1fs  speed %5.1f -> %5.1f (max %5.1f, %+5.1f m/s per s)  alt %4.0f -> %4.0f  vy %+5.1f..%+5.1f",
-    s.name, dur, s.v0, v, s.vmax, dur > 0 and (v - s.v0) / dur or 0, s.alt0, pos.y, s.vyMin, s.vyMax)
+  summary[#summary + 1] = string.format("%-9s %5.1fs  speed %5.1f -> %5.1f (max %5.1f, %+5.1f m/s per s)  dist %5.0f  alt %4.0f -> %4.0f  vy %+5.1f..%+5.1f",
+    s.name, dur, s.v0, v, s.vmax, dur > 0 and (v - s.v0) / dur or 0, math.sqrt((pos.x - s.x0) ^ 2 + (pos.z - s.z0) ^ 2), s.alt0, pos.y, s.vyMin, s.vyMax)
   summary[#summary + 1] = string.format("         pitch avg %5.1f wobble %4.1f  nose vs path %4.1f  roll rate max %4.2f  spin max %4.2f  gimbal RMS %.2f at limit %2.0f%%",
     pm, math.sqrt(math.max(s.p2 / n - pm * pm, 0)), s.aoa / n, s.rollMax, s.spinMax, math.sqrt(s.g2 / n), 100 * s.sat / n)
   writeSummary()
@@ -234,7 +231,7 @@ local function run()
   local log = fs.open(C.LOG, "w")
   if log then
     log.writeLine(string.format("FLIGHT TEST y0 %.1f heading %.2f %.2f MASS %.1f TACC %.1f", y0, f.x, f.z, mass, TACC))
-    log.writeLine("t stage thr speed alt vy pitch nose_vs_path roll_rate spin gx gy")
+    log.writeLine("t stage thr speed alt vy pitch nose_vs_path roll_rate spin gx gy yaw vh")
   end
   local stage, tS = "LIFTOFF", 0
   local thr = HOVER * 0.75
@@ -242,11 +239,11 @@ local function run()
   local cmdPitch = 90
   local holdY, bias = y0 + C.CLIMB, 0
   local hist = {}
-  local okT, calmT = 0, 0
+  local calmT = 0
+  local flipTheta, fv, back = 0, f, f
   local locked = true
   local t0 = os.clock()
   local last, nextLog = t0, t0
-  local after
   stageStart(stage, 0, pos, 0)
   local function go(name, t)
     stageEnd(t, pos, len(vel))
@@ -274,7 +271,7 @@ local function run()
     local nose = rotate(w, u, UP)
     local vh = math.sqrt(vel.x * vel.x + vel.z * vel.z)
     local rollRate = 0
-    local fast = stage == "PITCHOVER" or stage == "CRUISE70" or stage == "ROLL" or stage == "CLIMB" or stage == "LEVEL85" or stage == "LEVEL90"
+    local fast = stage == "PITCHOVER" or stage == "CRUISE70"
     if fast and pos.y < y0 + C.FLOOR then go("PULLUP", t) end
     if stage == "LIFTOFF" then
       thr = math.min(thr + 0.3 * dt, 0.9)
@@ -288,47 +285,40 @@ local function run()
         locked = false
         go("PITCHOVER", t)
       end
-    elseif stage == "PITCHOVER" or stage == "CRUISE70" or stage == "ROLL" or stage == "CLIMB" then
+    elseif stage == "PITCHOVER" or stage == "CRUISE70" then
       thr = math.min(thr + 0.5 * dt, 1)
-      local amax = (stage == "CLIMB" and (vel.y < -10 or holdY - pos.y > 80)) and C.AMAX_REC or C.AMAX
-      local want = hold(amax, dt)
+      local want = hold(C.AMAX, dt)
       cmdPitch = cmdPitch + clamp(want - cmdPitch, -C.PITCH_RATE * dt, C.PITCH_RATE * dt)
       cmd = fromPitch(f, cmdPitch)
       if stage == "PITCHOVER" then
         if locked and math.abs(vel.y) < 3 then go("CRUISE70", t) end
-      elseif stage == "CRUISE70" then
+      else
         hist[#hist + 1] = { t, v }
         local old
         for i = #hist, 1, -1 do
           if hist[i][1] <= t - C.PLATEAU_WIN then old = hist[i] break end
         end
-        if (tS > C.PLATEAU_T and old and v - old[2] < C.PLATEAU_DV) or tS > C.CRUISE_MAX_T then go("ROLL", t) end
-      elseif stage == "ROLL" then
-        rollRate = tS < C.ROLL_ON and C.ROLL_RATE or 0
-        if tS >= C.ROLL_T then
-          holdY, after = y0 + C.HIGH, "LEVEL85"
-          go("CLIMB", t)
-        end
-      else
-        if math.abs(holdY - pos.y) < 15 and math.abs(vel.y) < 3 then okT = okT + dt else okT = 0 end
-        if okT > 2 or tS > C.CLIMB_MAX_T then
-          okT = 0
-          go(after, t)
+        if (tS > C.PLATEAU_T and old and v - old[2] < C.PLATEAU_DV) or tS > C.CRUISE_MAX_T then
+          flipTheta = cmdPitch
+          fv = vh > 1 and { x = vel.x / vh, y = 0, z = vel.z / vh } or f
+          go("FLIP", t)
         end
       end
-    elseif stage == "LEVEL85" or stage == "LEVEL90" then
+    elseif stage == "FLIP" then
+      thr = C.FLIP_THR
+      flipTheta = math.min(flipTheta + C.FLIP_RATE * dt, C.FLIP_END)
+      cmd = fromPitch(fv, flipTheta)
+      local off = math.deg(math.acos(clamp(dot(nose, cmd), -1, 1)))
+      if (flipTheta >= C.FLIP_END and off < C.FLIP_OK) or tS > C.FLIP_MAX_T then
+        holdY, locked, bias = pos.y, true, 0
+        go("RETRO", t)
+      end
+    elseif stage == "RETRO" then
       thr = 1
-      local want = stage == "LEVEL85" and 5 or 0
-      cmdPitch = cmdPitch + clamp(want - cmdPitch, -C.PITCH_RATE * dt, C.PITCH_RATE * dt)
-      cmd = fromPitch(f, cmdPitch)
-      if tS > C.LEVEL_T or pos.y < y0 + C.LEVEL_MIN or vel.y < -C.LEVEL_SINK then
-        if stage == "LEVEL85" then
-          holdY, after = y0 + C.HIGH, "LEVEL90"
-          go("CLIMB", t)
-        else
-          go("PULLUP", t)
-        end
-      end
+      local p = hold(C.AMAX, dt)
+      if vh > 1 then back = { x = -vel.x / vh, y = 0, z = -vel.z / vh } end
+      cmd = fromPitch(back, p)
+      if vh < C.RETRO_END_V then go("UPRIGHT", t) end
     elseif stage == "PULLUP" then
       thr = 1
       cmdPitch = cmdPitch + clamp(C.PULL_PITCH - cmdPitch, -C.PULL_RATE * dt, C.PULL_RATE * dt)
@@ -361,7 +351,8 @@ local function run()
     local aoa = v > 1 and math.deg(math.acos(clamp(dot(nose, vel) / v, -1, 1))) or 0
     stageSample(v, vel, pitch, aoa, om, gx, gy)
     if log and now >= nextLog then
-      log.writeLine(string.format("%.2f %s %.2f %.1f %.1f %+.1f %+.1f %.1f %+.2f %.2f %+.2f %+.2f", t, stage, thr, v, pos.y, vel.y, pitch, aoa, om.y, len(om), gx, gy))
+      local yaw = math.deg(atan2(f.x * nose.z - f.z * nose.x, f.x * nose.x + f.z * nose.z))
+      log.writeLine(string.format("%.2f %s %.2f %.1f %.1f %+.1f %+.1f %.1f %+.2f %.2f %+.2f %+.2f %+.0f %.1f", t, stage, thr, v, pos.y, vel.y, pitch, aoa, om.y, len(om), gx, gy, yaw, vh))
       log.flush()
       nextLog = now + C.LOG_DT
     end
@@ -402,7 +393,7 @@ end
 term.clear()
 term.setCursorPos(1, 1)
 print("FLIGHT TEST: climb 200, full-throttle cruise to top speed,")
-print("roll test, 85 and 90 degree runs, pull-up, descent.")
+print("flip to face backwards, retro burn, upright descent.")
 print("Backspace cuts the engines at any time.")
 print("Launch in 5 s.")
 for _ = 1, 5 do
