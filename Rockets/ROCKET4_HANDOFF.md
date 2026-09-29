@@ -21,11 +21,12 @@ Files delivered alongside this doc:
 - Peripherals on a wired modem: `liquid_vector_thruster_0..3`, plus fluid vessel `createpropulsion:platinum_fluid_vessel_block_entity_0`. Another vessel sits on the computer `front`. It is NOT on the modem network, so thrusters can't `pullFluid` from it; it would need its own modem.
 - Fuel: lava. Each thruster has a 1000 mB internal buffer. `pullFluid(tankName)` pulls from a vessel on the same network.
 - Thruster methods: getPower, getTargetVectorX/Y, getThrust, getVectorX/Y, pullFluid, pushFluid, setPower, setPowerNormalized, setThrust, setThrustNormalized, setVector(gx, gy), setVectorX/Y, tanks.
-- Physical layout (user-stated, confirmed by measurement). Engine index = sorted-name order:
-  - E1 `thruster_0` = front (body +Z, -X)
-  - E2 `thruster_1` = front-right (+Z, +X)
-  - E3 `thruster_2` = under the computer (-Z, -X)
-  - E4 `thruster_3` = right (-Z, +X)
+- Physical layout (user-stated, confirmed by measurement). Engine index E1..E4 is set by `C.ENGINE_ORDER` (thruster numbers in E1..E4 order; falls back to sorted-name order if the numbers don't match). Current wiring, `ENGINE_ORDER = { 2, 3, 1, 0 }`:
+  - E1 `thruster_2` = front (body +Z, -X)
+  - E2 `thruster_3` = front-right (+Z, +X)
+  - E3 `thruster_1` = under the computer (-Z, -X)
+  - E4 `thruster_0` = right (-Z, +X)
+  - If the modems are reconnected and numbers change, update `ENGINE_ORDER` (the roll pattern depends on it). The simulator mirrors this wiring in `sim4.lua` (`wrap`).
   - Body frame: y = nose axis, +Z = front, +X = right. Engines are about 0.5 blocks from the CoM horizontally.
 - Pad: CoM at y ≈ -53.3 when resting. Pad world pose was about (-331.65, -53.36, 44.86) in an early test.
 - The rope net seems to be about Y -51. In a real NET flight the rocket came to rest with CoM at -46.3, i.e. 10 blocks above the -61 the user typed. Touchdown detection handles a wrong destination Y.

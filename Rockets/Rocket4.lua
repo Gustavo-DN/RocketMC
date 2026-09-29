@@ -2,6 +2,7 @@ local REMOTE = ...
 if type(REMOTE) ~= "table" then REMOTE = nil end
 local C = {
   ENGINE_TYPE = "liquid_vector_thruster",
+  ENGINE_ORDER = { 2, 3, 1, 0 },
   TANK_TYPE = "fluid_storage",
   FLARE_SIDE = "top",
   FLARE_PULSE = 1.0,
@@ -183,6 +184,15 @@ for _, n in ipairs(peripheral.getNames()) do
   if peripheral.hasType(n, C.ENGINE_TYPE) then E.names[#E.names + 1] = n end
 end
 table.sort(E.names)
+do
+  local ord, full = {}, #C.ENGINE_ORDER == #E.names
+  for _, n in ipairs(E.names) do
+    local k = tonumber(n:match("_(%d+)$"))
+    for i, want in ipairs(C.ENGINE_ORDER) do if k == want then ord[i] = n end end
+  end
+  for i = 1, #C.ENGINE_ORDER do if not ord[i] then full = false end end
+  if full then E.names = ord end
+end
 if #E.names == 0 then error("no " .. C.ENGINE_TYPE .. " found", 0) end
 E.N = #E.names
 for i, n in ipairs(E.names) do
