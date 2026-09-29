@@ -153,6 +153,11 @@ local C = {
   APPROACH_NAV = 3,
   ARC_AB_MIN = 0,
   ARC_APPROACH_H = 60,
+  ARC_FAST = true,
+  ARC_DIVE_ANG = 30,
+  ARC_DIVE_T = 4,
+  ARC_DIVE_THR = 0.5,
+  ARC_DIVE_NAV = 3,
   DIVE_V = 15,
   DIVE_H = 250,
   DIVE_R = 0.4,
@@ -632,32 +637,36 @@ local function guideStep(g, pos, vel, nose, dt)
     local handoff = arc and C.DIVE_V * C.DIVE_V / (2 * C.DIVE_AH) + C.DIVE_R * math.max(pos.y - tgt.y - C.NOSE_OFFSET, 0) or C.NET_VMAX * C.NET_VMAX / (2 * C.NET_ABRAKE) + C.AB_MARGIN
     local v = len(vel)
     local st = C.BRAKE_STYLE[g.mode] or "TILT"
-    if g.tmode == "BRAKE" and dh - handoff > C.AB_REARM_D then
-      if v < C.AB_REARM_K * brakeProf(dh - handoff, vEnd, st) then g.tmode = "AB" end
-    end
-    if dh <= handoff or (g.tmode == "BRAKE" and v <= vEnd + 5 and dh - handoff <= C.AB_REARM_D) then
-      g.phase, g.tmode, g.bias = arc and "DIVE" or "TRANSFER", arc and "DIVE" or "AUTO", 0
-    elseif g.tmode == "BRAKE" or (dh - handoff) <= brakeDist(v, vEnd, st) then
-      g.tmode = "BRAKE"
-      if st == "FLIP" and (v <= C.FLIP_V + 5 or dh - handoff <= flipDist(v, vEnd)) then
-        g.phase, g.tmode = "FLIP", "FLIP"
-        return flipDir(g, pos, vel, hx, hz, dh, dh - handoff, vEnd)
+    if arc and C.ARC_FAST and dh <= math.max(pos.y - tgt.y, 0) / math.tan(math.rad(C.ARC_DIVE_ANG)) + v * C.ARC_DIVE_T then
+      g.phase, g.tmode, g.fast = "DIVE", "DIVE", true
+    else
+      if g.tmode == "BRAKE" and dh - handoff > C.AB_REARM_D then
+        if v < C.AB_REARM_K * brakeProf(dh - handoff, vEnd, st) then g.tmode = "AB" end
       end
-      if st ~= "TILT" then
-        g.throttle = clamp(C.COAST_MIN_THR + C.COAST_KT * (brakeProf(dh - handoff, vEnd, st) - v) / C.THRUST_ACC, C.COAST_MIN_THR, C.AB_MAX_THR)
+      if dh <= handoff or (g.tmode == "BRAKE" and v <= vEnd + 5 and dh - handoff <= C.AB_REARM_D) then
+        g.phase, g.tmode, g.bias = arc and "DIVE" or "TRANSFER", arc and "DIVE" or "AUTO", 0
+      elseif g.tmode == "BRAKE" or (dh - handoff) <= brakeDist(v, vEnd, st) then
+        g.tmode = "BRAKE"
+        if st == "FLIP" and (v <= C.FLIP_V + 5 or dh - handoff <= flipDist(v, vEnd)) then
+          g.phase, g.tmode = "FLIP", "FLIP"
+          return flipDir(g, pos, vel, hx, hz, dh, dh - handoff, vEnd)
+        end
+        if st ~= "TILT" then
+          g.throttle = clamp(C.COAST_MIN_THR + C.COAST_KT * (brakeProf(dh - handoff, vEnd, st) - v) / C.THRUST_ACC, C.COAST_MIN_THR, C.AB_MAX_THR)
+          return levelDir(g, pos, vel, hx / dh, hz / dh, dt)
+        end
+        local sp = math.min(C.AB_VMAX, brakeProf(dh - handoff, vEnd, st))
+        return velCmd(g, { x = hx / dh * sp, y = clamp((g.P.y - pos.y) * 0.5, -10, 10), z = hz / dh * sp }, vel, nose, dt, C.NET_TILT, C.AB_MAX_THR, true)
+      else
+        g.tmode = "AB"
+        local abFloor = math.min(C.AB_MAX_THR, (C.GRAV + 1) / (C.THRUST_ACC * math.max(math.sin(math.rad(C.AB_PITCH_UP)), 0.05)))
+        if v < C.AB_VMAX - 5 or g.throttle < abFloor then
+          g.throttle = math.min(g.throttle + C.WATER_RAMP * dt, C.AB_MAX_THR)
+        elseif v > C.AB_VMAX then
+          g.throttle = math.max(g.throttle - 1.5 * dt, abFloor)
+        end
         return levelDir(g, pos, vel, hx / dh, hz / dh, dt)
       end
-      local sp = math.min(C.AB_VMAX, brakeProf(dh - handoff, vEnd, st))
-      return velCmd(g, { x = hx / dh * sp, y = clamp((g.P.y - pos.y) * 0.5, -10, 10), z = hz / dh * sp }, vel, nose, dt, C.NET_TILT, C.AB_MAX_THR, true)
-    else
-      g.tmode = "AB"
-      local abFloor = math.min(C.AB_MAX_THR, (C.GRAV + 1) / (C.THRUST_ACC * math.max(math.sin(math.rad(C.AB_PITCH_UP)), 0.05)))
-      if v < C.AB_VMAX - 5 or g.throttle < abFloor then
-        g.throttle = math.min(g.throttle + C.WATER_RAMP * dt, C.AB_MAX_THR)
-      elseif v > C.AB_VMAX then
-        g.throttle = math.max(g.throttle - 1.5 * dt, abFloor)
-      end
-      return levelDir(g, pos, vel, hx / dh, hz / dh, dt)
     end
   end
   if g.phase == "FLIP" then
@@ -678,6 +687,10 @@ local function guideStep(g, pos, vel, nose, dt)
     if tip.y <= tgt.y or g.stuck >= C.DIVE_STOP_T then
       g.phase, g.throttle, g.tmode = "TOUCHDOWN", 0, "OFF"
       return nil, true
+    end
+    if g.fast then
+      g.throttle = C.ARC_DIVE_THR
+      return approachDir(g, pos, vel, nose, nil, C.ARC_DIVE_NAV)
     end
     return arcDir(g, pos, vel)
   end
@@ -1304,7 +1317,11 @@ local function recoverStep(g, pos, vel, nose, om, dt)
     g.recOk = g.recOk + dt
     if g.recOk >= C.REC_HOLD then
       g.rec = false
-      if g.phase == "EXPRESS" or g.phase == "DIVE" or g.phase == "FLIP" then g.phase, g.tmode, g.bias = "TRANSFER", "AUTO", 0 end
+      if g.fast then
+        g.phase, g.tmode = "DIVE", "DIVE"
+      elseif g.phase == "EXPRESS" or g.phase == "DIVE" or g.phase == "FLIP" then
+        g.phase, g.tmode, g.bias = "TRANSFER", "AUTO", 0
+      end
       return nil
     end
   else

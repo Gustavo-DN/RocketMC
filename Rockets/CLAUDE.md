@@ -20,7 +20,7 @@ Read `ROCKET4_HANDOFF.md` first. It has all hardware facts, measured physics, AP
 - Never cut engines at altitude. Only the ground rule cuts (tilt > 60° within CUT_LOW of the ground).
 - Recovery must never add climbing thrust.
 - NET route: EXPRESS → BRAKE → TRANSFER → SINK (upright soft landing).
-- ARC route: EXPRESS → BRAKE → DIVE (nose-down arrival onto the net, `arcDir`, constants `DIVE_*`). Keep the mode name ARC.
+- ARC route (ARC_FAST, default): EXPRESS → DIVE with no braking. The descent starts when the line of sight to the destination is ARC_DIVE_ANG below horizontal (plus ARC_DIVE_T lead) and flies nose-first at ARC_DIVE_THR with `approachDir`. A recovery returns to DIVE. The net is very large, so speed matters more than precision. With ARC_FAST = false, ARC brakes (BRAKE_STYLE) and uses the slow `arcDir` DIVE.
 - Deliver the finished file; the user copies it into the game.
 
 ## Setup
@@ -46,7 +46,7 @@ for c in "TX=300 TZ=0" "TX=-400 TZ=600" "TX=1500 TZ=-900" "TX=-2500 TZ=300" "TX=
 ```
 
 Baseline to keep or beat:
-- ARC (nose-down DIVE, work in progress, not yet tuned): lands 3–100 blocks off at 64–104 m/s, landing tilt 117–167°. 400 blocks ≈ 35 s, 7,000 ≈ 72 s, 12,000 ≈ 94 s. Goal: accuracy back to a few blocks. The simulator prints `tip_xz`, `impV` and `landTilt` for this.
+- ARC (ARC_FAST): nose tip within about 1–10 blocks in most runs, arriving nose-down at 100–175 m/s. 400 blocks ≈ 25 s, 7,000 ≈ 62 s, 12,000 ≈ 83 s. The simulator prints `tip_xz`, `impV` and `landTilt`.
 - Previous upright ARC (commit 4d8760b), for reference: 15 of 16 within 1.4 blocks, worst 2.8.
 - NET: 0.2–0.4 blocks, no CUT.
 
@@ -59,4 +59,4 @@ Any `TERMERR` line is a runtime error (the program's top-level pcall hides it ot
 - The simulator matches real flights well except at 240 m/s EXPRESS; treat high-speed results as approximate.
 
 ## Current open work
-See section 9 of `ROCKET4_HANDOFF.md`. First priority: tune the ARC nose-down DIVE for accuracy (see the baseline above), then check a real ARC flight.log.
+See section 9 of `ROCKET4_HANDOFF.md`. First priority: check the user's next real ARC flight.log with ARC_FAST. Known weak spot: the high-speed EXPRESS pitch wobble (real log `logs/2026-09-28_ARC7000_flight.log`, 15–32 s). Stress-test physics that reproduce that flight: `CAX=0.085 LATMAX=20..25 TQMAX=2.5..3 KAERO=0.03..0.04 TY=-36 CLIMB=200 MASS=67.4`.
