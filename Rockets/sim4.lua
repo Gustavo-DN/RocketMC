@@ -1,5 +1,7 @@
 T = 0
-local TX, TZ, TY = tonumber(os.getenv("TX") or 300), tonumber(os.getenv("TZ") or 0), -58
+local TX, TZ, TY = tonumber(os.getenv("TX") or 300), tonumber(os.getenv("TZ") or 0), tonumber(os.getenv("TY") or -58)
+local MASS = tonumber(os.getenv("MASS") or 64.06)
+local TACC = 31.6 * 64.06 / MASS
 local PAD = -53.3
 local function qmul(a, b)
   return { w = a.w*b.w - a.x*b.x - a.y*b.y - a.z*b.z, x = a.w*b.x + a.x*b.w + a.y*b.z - a.z*b.y,
@@ -24,11 +26,11 @@ local function phys(dt)
     e.gx = e.gx + (e.tx - e.gx) * a
     e.gy = e.gy + (e.ty - e.gy) * a
     local tq = math.floor(e.thr * 15 + 1e-9) / 15
-    local k = tq / 0.335
+    local k = tq / 0.335 * TACC / 31.6
     az = az + GXZ[i] * e.gx * k
     ax = ax - 0.41 * e.gy * k
     ay = ay + (0.55 * SX[i] * e.gx + 0.52 * SY[i] * e.gy) * k
-    fy = fy + 31.6 / 4 * tq
+    fy = fy + TACC / 4 * tq
     fx = fx + 1.75 * e.gx * k
     fz = fz + 1.80 * e.gy * k
   end
@@ -111,7 +113,7 @@ sublevel = {
   getLogicalPose = function() return { position = { x = S.pos.x, y = S.pos.y, z = S.pos.z }, orientation = { w = S.q.w, x = S.q.x, y = S.q.y, z = S.q.z } } end,
   getLinearVelocity = function() return { x = S.vel.x, y = S.vel.y, z = S.vel.z } end,
   getAngularVelocity = function() return { x = S.om.x, y = S.om.y, z = S.om.z } end,
-  getMass = function() return 64.06 end,
+  getMass = function() return MASS end,
   getInertiaTensor = function() return { { 1144.4, 0, 0 }, { 0, 61.5, 0 }, { 0, 0, 1144.4 } } end,
 }
 fs = { open = function(p, m)
@@ -126,7 +128,7 @@ keys = { backspace = 14, enter = 28 }
 redstone = { setOutput = function() end }
 table.unpack = table.unpack or unpack
 RESULT = nil
-local REMOTE = { mission = { mode = os.getenv("MODE") or "NET", x = TX, y = TY, z = TZ, climb = 100 }, state = {},
+local REMOTE = { mission = { mode = os.getenv("MODE") or "NET", x = TX, y = TY, z = TZ, climb = tonumber(os.getenv("CLIMB") or 100) }, state = {},
   report = function() return false end, plan = function() end, launchIn = function() return 0 end,
   result = function(r, sp, t) RESULT = { r = r, sp = sp, t = t } end }
 local ok, err = pcall(loadfile(arg[1]), REMOTE)
