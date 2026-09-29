@@ -132,7 +132,7 @@ local C = {
   AB_BRAKE = 7,
   AB_REARM_D = 400,
   AB_REARM_K = 0.5,
-  BRAKE_STYLE = "TILT",
+  BRAKE_STYLE = { NET = "TILT", ARC = "TILT" },
   COAST_K = 0.06,
   COAST_KT = 0.5,
   COAST_MIN_THR = 0.14,
@@ -514,16 +514,16 @@ local function flipDist(v, vEnd)
   return math.max(v * v - vEnd * vEnd, 0) / (2 * C.FLIP_BRAKE) + v * C.FLIP_TURN_T + C.FLIP_PAD
 end
 
-local function brakeProf(d, vEnd)
+local function brakeProf(d, vEnd, st)
   d = math.max(d, 0)
-  if C.BRAKE_STYLE == "COAST" then return vEnd + C.COAST_K * d end
-  if C.BRAKE_STYLE == "FLIP" then return C.FLIP_V + C.COAST_K * math.max(d - flipDist(C.FLIP_V, vEnd), 0) end
+  if st == "COAST" then return vEnd + C.COAST_K * d end
+  if st == "FLIP" then return C.FLIP_V + C.COAST_K * math.max(d - flipDist(C.FLIP_V, vEnd), 0) end
   return math.sqrt(vEnd * vEnd + 2 * C.AB_BRAKE * d)
 end
 
-local function brakeDist(v, vEnd)
-  if C.BRAKE_STYLE == "COAST" then return math.max(v - vEnd, 0) / C.COAST_K + C.AB_PAD end
-  if C.BRAKE_STYLE == "FLIP" then return math.max(v - C.FLIP_V, 0) / C.COAST_K + flipDist(math.min(v, C.FLIP_V), vEnd) + C.AB_PAD end
+local function brakeDist(v, vEnd, st)
+  if st == "COAST" then return math.max(v - vEnd, 0) / C.COAST_K + C.AB_PAD end
+  if st == "FLIP" then return math.max(v - C.FLIP_V, 0) / C.COAST_K + flipDist(math.min(v, C.FLIP_V), vEnd) + C.AB_PAD end
   return math.max(v * v - vEnd * vEnd, 0) / (2 * C.AB_BRAKE) + C.AB_PAD
 end
 
@@ -631,22 +631,23 @@ local function guideStep(g, pos, vel, nose, dt)
     local vEnd = arc and C.DIVE_V or C.NET_VMAX
     local handoff = arc and C.DIVE_V * C.DIVE_V / (2 * C.DIVE_AH) + C.DIVE_R * math.max(pos.y - tgt.y - C.NOSE_OFFSET, 0) or C.NET_VMAX * C.NET_VMAX / (2 * C.NET_ABRAKE) + C.AB_MARGIN
     local v = len(vel)
+    local st = C.BRAKE_STYLE[g.mode] or "TILT"
     if g.tmode == "BRAKE" and dh - handoff > C.AB_REARM_D then
-      if v < C.AB_REARM_K * brakeProf(dh - handoff, vEnd) then g.tmode = "AB" end
+      if v < C.AB_REARM_K * brakeProf(dh - handoff, vEnd, st) then g.tmode = "AB" end
     end
     if dh <= handoff or (g.tmode == "BRAKE" and v <= vEnd + 5 and dh - handoff <= C.AB_REARM_D) then
       g.phase, g.tmode, g.bias = arc and "DIVE" or "TRANSFER", arc and "DIVE" or "AUTO", 0
-    elseif g.tmode == "BRAKE" or (dh - handoff) <= brakeDist(v, vEnd) then
+    elseif g.tmode == "BRAKE" or (dh - handoff) <= brakeDist(v, vEnd, st) then
       g.tmode = "BRAKE"
-      if C.BRAKE_STYLE == "FLIP" and (v <= C.FLIP_V + 5 or dh - handoff <= flipDist(v, vEnd)) then
+      if st == "FLIP" and (v <= C.FLIP_V + 5 or dh - handoff <= flipDist(v, vEnd)) then
         g.phase, g.tmode = "FLIP", "FLIP"
         return flipDir(g, pos, vel, hx, hz, dh, dh - handoff, vEnd)
       end
-      if C.BRAKE_STYLE ~= "TILT" then
-        g.throttle = clamp(C.COAST_MIN_THR + C.COAST_KT * (brakeProf(dh - handoff, vEnd) - v) / C.THRUST_ACC, C.COAST_MIN_THR, C.AB_MAX_THR)
+      if st ~= "TILT" then
+        g.throttle = clamp(C.COAST_MIN_THR + C.COAST_KT * (brakeProf(dh - handoff, vEnd, st) - v) / C.THRUST_ACC, C.COAST_MIN_THR, C.AB_MAX_THR)
         return levelDir(g, pos, vel, hx / dh, hz / dh, dt)
       end
-      local sp = math.min(C.AB_VMAX, brakeProf(dh - handoff, vEnd))
+      local sp = math.min(C.AB_VMAX, brakeProf(dh - handoff, vEnd, st))
       return velCmd(g, { x = hx / dh * sp, y = clamp((g.P.y - pos.y) * 0.5, -10, 10), z = hz / dh * sp }, vel, nose, dt, C.NET_TILT, C.AB_MAX_THR, true)
     else
       g.tmode = "AB"
@@ -1430,6 +1431,10 @@ local function flight(tgt, pred)
           if flog then flog.writeLine(string.format("RECOVER %s %.2f", why, now - t0)) end
           dir = recoverStep(g, pos, vel, nose, om, dt)
         end
+      end
+      if g.phase ~= g.iPhase then
+        if g.phase == "FLIP" or g.iPhase == "FLIP" then attI.x, attI.z = 0, 0 end
+        g.iPhase = g.phase
       end
       fl.phase, fl.tmode, fl.thr = g.rec and "RECOVER" or g.phase, g.tmode, g.throttle
       fl.pos, fl.speed, fl.dist = pos, len(vel), len(sub(tgt, pos))
