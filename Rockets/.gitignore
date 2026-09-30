@@ -7,3 +7,5 @@ sim_flighttest.log
 sim_flighttest.txt
 sim_maneuvertest.log
 sim_maneuvertest.txt
+sim_arcmaneuvertest.log
+sim_arcmaneuvertest.txt
