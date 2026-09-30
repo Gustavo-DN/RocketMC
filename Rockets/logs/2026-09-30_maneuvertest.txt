@@ -1,0 +1,45 @@
+MANEUVER TEST  MASS 67.4  TACC 30.0  HOVER 0.350
+
+BRAKE TABLE (flip + retro burn, until under 20 m/s)
+start v | total dist | total time | flip dist | flip time | v after flip | burn dist | burn time | alt change | max spin
+ 126.2  |       627  |       6.1s |      500  |      4.0s |        95.7  |      126  |      2.1s |        -8  |    1.16
+ 189.1  |       869  |       6.5s |      604  |      3.3s |       144.5  |      265  |      3.2s |       +15  |    1.18
+ 240.2  |      1184  |       7.5s |      770  |      3.4s |       184.2  |      414  |      4.1s |        +8  |    1.17
+ 318.2  |      1670  |       8.7s |      995  |      3.3s |       243.7  |      675  |      5.3s |       -22  |    1.17
+
+LIFTOFF     0.9s  speed   0.0 ->   0.7 (max   0.5,  +0.8 m/s per s)  dist     0  alt  -53 ->  -53  vy  +0.0.. +0.5
+         pitch avg  90.0 wobble  0.0  nose vs path  0.0  roll rate max 0.00  spin max 0.00  gimbal RMS 0.00 at limit  0%
+ASCENT     14.6s  speed   0.7 ->   4.0 (max  20.3,  +0.2 m/s per s)  dist     0  alt  -53 ->  144  vy  +0.0..+20.3
+         pitch avg  89.5 wobble  0.2  nose vs path  0.5  roll rate max 0.01  spin max 0.03  gimbal RMS 0.02 at limit  0%
+PITCHOVER   8.3s  speed   4.0 -> 121.0 (max 121.1, +14.1 m/s per s)  dist   365  alt  144 ->  357  vy  +0.0..+43.8
+         pitch avg  42.2 wobble 33.8  nose vs path  9.4  roll rate max 0.03  spin max 0.44  gimbal RMS 0.14 at limit  0%
+ACCEL       0.0s  speed 121.0 -> 126.2 (max 121.0, +104.0 m/s per s)  dist     6  alt  357 ->  357  vy  +0.0.. +0.6
+         pitch avg  -4.2 wobble  0.0  nose vs path  4.7  roll rate max 0.03  spin max 0.09  gimbal RMS 0.09 at limit  0%
+FLIP        4.0s  speed 126.2 ->  95.7 (max 141.2,  -7.7 m/s per s)  dist   500  alt  357 ->  337  vy -12.5.. +2.5
+         pitch avg  44.6 wobble 27.2  nose vs path 75.9  roll rate max 0.04  spin max 1.16  gimbal RMS 0.21 at limit  0%
+RETRO       2.1s  speed  95.7 ->  20.5 (max  95.7, -35.0 m/s per s)  dist   126  alt  337 ->  349  vy  +0.0.. +7.7
+         pitch avg  24.8 wobble  8.1  nose vs path 148.1  roll rate max 0.01  spin max 0.30  gimbal RMS 0.06 at limit  0%
+ACCEL       9.6s  speed  20.5 -> 189.1 (max 179.0, +17.7 m/s per s)  dist   934  alt  349 ->  362  vy  -4.0.. +5.0
+         pitch avg  19.5 wobble  4.4  nose vs path 30.6  roll rate max 0.02  spin max 0.16  gimbal RMS 0.04 at limit  0%
+FLIP        3.3s  speed 189.1 -> 144.5 (max 194.0, -13.3 m/s per s)  dist   604  alt  362 ->  368  vy  -3.7.. +7.2
+         pitch avg  48.5 wobble 21.9  nose vs path 75.1  roll rate max 0.05  spin max 1.18  gimbal RMS 0.28 at limit  0%
+RETRO       3.2s  speed 144.5 ->  22.1 (max 144.5, -38.2 m/s per s)  dist   265  alt  368 ->  377  vy  -9.3.. +9.4
+         pitch avg  12.6 wobble 10.8  nose vs path 163.6  roll rate max 0.02  spin max 0.50  gimbal RMS 0.07 at limit  0%
+ACCEL      14.9s  speed  22.1 -> 240.2 (max 238.7, +14.6 m/s per s)  dist  2067  alt  377 ->  363  vy -13.1.. +4.2
+         pitch avg  21.1 wobble  4.2  nose vs path 31.6  roll rate max 0.11  spin max 0.19  gimbal RMS 0.03 at limit  0%
+FLIP        3.4s  speed 240.2 -> 184.2 (max 243.7, -16.5 m/s per s)  dist   770  alt  363 ->  369  vy  -3.7.. +7.6
+         pitch avg  48.4 wobble 22.2  nose vs path 74.9  roll rate max 0.08  spin max 1.17  gimbal RMS 0.27 at limit  0%
+RETRO       4.1s  speed 184.2 ->  23.4 (max 184.2, -39.2 m/s per s)  dist   414  alt  369 ->  371  vy -12.3.. +9.8
+         pitch avg  12.4 wobble  9.5  nose vs path 166.5  roll rate max 0.04  spin max 0.47  gimbal RMS 0.05 at limit  0%
+ACCEL      34.4s  speed  23.4 -> 318.2 (max 318.2,  +8.6 m/s per s)  dist  7830  alt  371 ->  361  vy -12.8.. +4.3
+         pitch avg  20.0 wobble  2.4  nose vs path 24.1  roll rate max 0.08  spin max 0.19  gimbal RMS 0.03 at limit  0%
+FLIP        3.3s  speed 318.2 -> 243.7 (max 319.7, -22.2 m/s per s)  dist   995  alt  361 ->  357  vy  -6.7.. +4.8
+         pitch avg  48.4 wobble 21.9  nose vs path 75.6  roll rate max 0.08  spin max 1.17  gimbal RMS 0.26 at limit  0%
+RETRO       5.3s  speed 243.7 ->  21.9 (max 243.7, -41.9 m/s per s)  dist   675  alt  357 ->  339  vy -11.0.. +7.1
+         pitch avg  15.5 wobble  8.3  nose vs path 168.4  roll rate max 0.03  spin max 0.49  gimbal RMS 0.05 at limit  0%
+UPRIGHT     3.2s  speed  21.9 ->  14.7 (max  22.1,  -2.2 m/s per s)  dist    18  alt  339 ->  296  vy -15.4.. +0.0
+         pitch avg  45.4 wobble 14.9  nose vs path 153.7  roll rate max 0.01  spin max 0.40  gimbal RMS 0.36 at limit  0%
+DESCENT    41.4s  speed  14.7 ->   0.1 (max  14.7,  -0.4 m/s per s)  dist     0  alt  296 ->  -53  vy -14.7.. +0.1
+         pitch avg  87.0 wobble  5.7  nose vs path 172.5  roll rate max 0.03  spin max 0.45  gimbal RMS 0.11 at limit  0%
+LANDED      0.0s  speed   0.1 ->   0.1 (max   0.1,  +0.0 m/s per s)  dist     0  alt  -53 ->  -53  vy  +0.0.. +0.0
+         pitch avg   0.0 wobble  0.0  nose vs path  0.0  roll rate max 0.00  spin max 0.00  gimbal RMS 0.00 at limit  0%
