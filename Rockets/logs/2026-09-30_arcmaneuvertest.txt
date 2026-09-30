@@ -1,0 +1,28 @@
+ARC MANEUVER TEST  MASS 67.4  TACC 30.0  HOVER 0.350
+
+DIVE TABLE (Rocket4 ARC steering, throttle 0.50, destination 450 blocks below)
+start dist = drop / tan(angle) + entry v * lead (Rocket4 ARC rule, lead 4 s)
+entry v | angle | start dist | dive time | miss  | arrive v | path angle | nose tilt | pull-out drop | max spin | note
+ 351.6  |   30  |      2186  |      8.0s |  11.5 |   242.5  |      29.5  |    122.7  |          419  |    1.63  | 
+
+LIFTOFF     0.9s  speed   0.0 ->   0.7 (max   0.5,  +0.7 m/s per s)  dist     0  alt  -53 ->  -53  vy  +0.0.. +0.5
+         pitch avg  90.0 wobble  0.0  nose vs path  0.0  roll rate max 0.00  spin max 0.00  gimbal RMS 0.00 at limit  0%
+ASCENT     14.5s  speed   0.7 ->   4.0 (max  20.3,  +0.2 m/s per s)  dist     0  alt  -53 ->  144  vy  +0.0..+20.3
+         pitch avg  89.6 wobble  0.2  nose vs path  0.4  roll rate max 0.02  spin max 0.02  gimbal RMS 0.03 at limit  0%
+PITCHOVER   8.3s  speed   4.0 -> 125.2 (max 125.2, +14.6 m/s per s)  dist   366  alt  144 ->  357  vy  +0.0..+43.8
+         pitch avg  42.2 wobble 33.9  nose vs path  9.5  roll rate max 0.02  spin max 0.45  gimbal RMS 0.14 at limit  0%
+CLIMBUP    59.4s  speed 125.2 -> 325.1 (max 340.5,  +3.4 m/s per s)  dist 17285  alt  357 -> 1645  vy  -8.9..+40.0
+         pitch avg  23.8 wobble  4.3  nose vs path 19.8  roll rate max 0.09  spin max 0.55  gimbal RMS 0.04 at limit  0%
+ACCEL       1.1s  speed 325.1 -> 351.6 (max 351.6, +25.2 m/s per s)  dist   364  alt 1645 -> 1649  vy  +0.0.. +4.8
+         pitch avg  17.6 wobble  0.2  nose vs path 16.9  roll rate max 0.07  spin max 0.07  gimbal RMS 0.01 at limit  0%
+DIVE        8.0s  speed 351.6 -> 242.5 (max 351.6, -13.6 m/s per s)  dist  2187  alt 1649 -> 1201  vy -119.1.. +3.5
+         pitch avg -48.5 wobble 29.5  nose vs path 41.0  roll rate max 0.43  spin max 1.63  gimbal RMS 0.64 at limit 13%
+LOW FUEL 5992 mB before trial 2, landing
+PULLOUT     6.0s  speed 242.5 -> 160.5 (max 242.6, -13.7 m/s per s)  dist  1154  alt 1201 ->  782  vy -123.0.. +0.0
+         pitch avg  58.9 wobble 33.8  nose vs path 82.7  roll rate max 0.56  spin max 1.54  gimbal RMS 0.20 at limit  0%
+UPRIGHT     0.3s  speed 160.5 -> 159.0 (max 160.5,  -4.2 m/s per s)  dist    56  alt  782 ->  784  vy  +0.0.. +0.6
+         pitch avg  83.7 wobble  0.0  nose vs path 95.8  roll rate max 0.01  spin max 0.03  gimbal RMS 0.02 at limit  0%
+DESCENT    90.3s  speed 159.0 ->   0.0 (max 159.2,  -1.8 m/s per s)  dist   981  alt  784 ->  -53  vy -11.9..+10.5
+         pitch avg  86.0 wobble  8.5  nose vs path 168.2  roll rate max 0.03  spin max 0.39  gimbal RMS 0.11 at limit  0%
+LANDED      0.0s  speed   0.0 ->   0.0 (max   0.0,  +0.0 m/s per s)  dist     0  alt  -53 ->  -53  vy  +0.0.. +0.0
+         pitch avg   0.0 wobble  0.0  nose vs path  0.0  roll rate max 0.00  spin max 0.00  gimbal RMS 0.00 at limit  0%

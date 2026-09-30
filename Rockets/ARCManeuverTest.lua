@@ -40,7 +40,8 @@ local C = {
   LOG = "arcmaneuvertest.log",
   SUMMARY = "arcmaneuvertest.txt",
   TRIALS = { { v = 0, los = 30, lead = 4 }, { v = 200, los = 45, lead = 4 }, { v = 200, los = 60, lead = 4 } },
-  CRUISE_H = 1700,
+  CRUISE_H = 1300,
+  SLOW_END_V = 20,
   DIVE_H = 450,
   SPEED_KT = 0.03,
   SPEED_MIN_THR = 0.5,
@@ -316,10 +317,12 @@ local function run()
     ti = ti + 1
     local fuelNow = fluidTotal()
     if not C.TRIALS[ti] then
-      go("UPRIGHT", t)
+      holdY, locked, bias = pos.y, true, 0
+      go("SLOW", t)
     elseif fuelNow and fuelNow < C.FUEL_MIN then
       summary[#summary + 1] = string.format("LOW FUEL %.0f mB before trial %d, landing", fuelNow, ti)
-      go("UPRIGHT", t)
+      holdY, locked, bias = pos.y, true, 0
+      go("SLOW", t)
     else
       holdY, locked = y0 + C.CRUISE_H, true
       go("CLIMBUP", t)
@@ -399,6 +402,12 @@ local function run()
         cmdPitch = math.deg(math.asin(clamp(nose.y, -1, 1)))
         nextTrial(t)
       end
+    elseif stage == "SLOW" then
+      thr = 1
+      local p = hold(C.AMAX, dt)
+      local back = vh > 1 and { x = -vel.x / vh, y = 0, z = -vel.z / vh } or f
+      cmd = fromPitch(back, p)
+      if vh < C.SLOW_END_V then go("UPRIGHT", t) end
     elseif stage == "PULLUP" then
       thr = 1
       cmdPitch = cmdPitch + clamp(C.PULL_PITCH - cmdPitch, -C.PULL_RATE * dt, C.PULL_RATE * dt)
@@ -474,7 +483,7 @@ end
 
 term.clear()
 term.setCursorPos(1, 1)
-print("ARC MANEUVER TEST: climb to +1700, then nose-down")
+print("ARC MANEUVER TEST: climb to +1300, then nose-down")
 print("dives at an imaginary destination 350 blocks lower,")
 print("pull-outs, and an upright descent at the end.")
 print("Backspace cuts the engines at any time.")
