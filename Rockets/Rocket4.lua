@@ -2,7 +2,7 @@ local REMOTE = ...
 if type(REMOTE) ~= "table" then REMOTE = nil end
 local C = {
   ENGINE_TYPE = "liquid_vector_thruster",
-  ENGINE_ORDER = { 0, 1, 3, 2 },
+  ENGINE_ORDER = { 2, 3, 1, 0 },
   TANK_TYPE = "fluid_storage",
   FLARE_SIDE = "top",
   FLARE_PULSE = 1.0,
