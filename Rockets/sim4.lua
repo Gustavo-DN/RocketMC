@@ -133,7 +133,7 @@ keys = { backspace = 14, enter = 28 }
 redstone = { setOutput = function() end }
 table.unpack = table.unpack or unpack
 RESULT = nil
-local REMOTE = { mission = { mode = os.getenv("MODE") or "NET", x = TX, y = TY, z = TZ, climb = tonumber(os.getenv("CLIMB") or 100) }, state = {},
+local REMOTE = { mission = { mode = os.getenv("MODE") or "NET", x = TX, y = TY, z = TZ, climb = tonumber(os.getenv("CLIMB") or 100), password = os.getenv("PASS") }, state = {},
   report = function() return false end, plan = function() end, launchIn = function() return 0 end,
   result = function(r, sp, t) RESULT = { r = r, sp = sp, t = t } end }
 local ok, err = pcall(loadfile(arg[1]), REMOTE)
