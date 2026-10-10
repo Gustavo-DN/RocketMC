@@ -30,11 +30,12 @@ local C = {
   LOCK_FILE = ".transport.lock",
   EXIT_FILE = ".transport.exit",
   AUDIT = "launch.log",
-  MAX_DIST = 30000,
+  MAX_DIST = 60000,
   MIN_Y = -64,
   MAX_Y = 320,
   MIN_CLIMB = 20,
   MAX_CLIMB = 500,
+  FUEL_CHECK = false,
   FUEL_RATE = 157.5,
   FUEL_SPEED = 250,
   FUEL_FIXED_T = 60,
@@ -1333,7 +1334,7 @@ local function tryLaunch()
     local d = math.sqrt((t.x - p.x) ^ 2 + (t.z - p.z) ^ 2)
     if d > C.MAX_DIST then msg = "TOO FAR (MAX " .. C.MAX_DIST .. ")" return nil end
     local need = C.FUEL_RATE * (d / C.FUEL_SPEED + C.FUEL_FIXED_T) * C.FUEL_MARGIN
-    if tel.tank and tel.tank + (tel.eng or 0) < need then msg = "NEED " .. math.floor(need) .. " mB FUEL" return nil end
+    if C.FUEL_CHECK and tel.tank and tel.tank + (tel.eng or 0) < need then msg = "NEED " .. math.floor(need) .. " mB FUEL" return nil end
   end
   climb = c
   mode = fields[5].value
@@ -1700,7 +1701,7 @@ local function flight(tgt, pred)
         dir = recoverStep(g, pos, vel, nose, om, dt)
         if not g.rec and flog then flog.writeLine(string.format("RESUME %.2f", now - t0)) end
       end
-      if g.phase == "EXPRESS" and not g.lowFuel and tel.tank and (tel.tank + (tel.eng or 0)) < C.FUEL_RESERVE then
+      if C.FUEL_CHECK and g.phase == "EXPRESS" and not g.lowFuel and tel.tank and (tel.tank + (tel.eng or 0)) < C.FUEL_RESERVE then
         local vh = math.sqrt(vel.x * vel.x + vel.z * vel.z)
         if vh > C.FUEL_LAND_V then
           local d = (C.BRK_A * vh + C.BRK_B * vh * vh) * (1 + C.BRK_PAD_K) + C.BRK_PAD + C.FUEL_LAND_PAD
