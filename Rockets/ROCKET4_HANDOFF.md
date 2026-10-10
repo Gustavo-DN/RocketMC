@@ -24,7 +24,7 @@ Files delivered alongside this doc:
 - Physical layout (user-stated, confirmed by measurement). Engine index E1..E4 is set by `C.ENGINE_ORDER` (thruster numbers in E1..E4 order; falls back to sorted-name order if the numbers don't match). Current wiring (2026-10-10, corrected after a server flight spun), `ENGINE_ORDER = { 2, 3, 1, 0 }`:
   - E1 `thruster_2`, E2 `thruster_3`, E3 `thruster_1`, E4 `thruster_0`.
   - The user described thruster_0 front, thruster_1 front-right, thruster_3 under the computer, thruster_2 right, which gave `{ 0, 1, 3, 2 }`. On the server that order made the roll correction push the wrong way: with roll command +0.30, the roll rate kept growing negative (-0.07 to -1.39 rad/s in 2.5 s of ascent), then RECOVER SPIN loops and CUT TILT. The positions as described are rotated 180° relative to the body frame. Reversing the order flips both roll patterns; collective pitch/yaw doesn't depend on the order.
-  - Check: if `roll` sits at its limit, `roll` and `wy` have opposite signs, and `|wy|` keeps growing, the roll is inverted. Reverse the order.
+  - Check: if `roll` sits at its limit but `|wy|` keeps growing for a second or more, the roll is inverted. Reverse the order.
   - If the modems are reconnected and numbers change, update `ENGINE_ORDER` in Rocket4, Transport, FlightTest, ManeuverTest and ARCManeuverTest (the roll pattern depends on it). The simulator mirrors this wiring in `sim4.lua` (`wrap`).
   - Body frame: y = nose axis, +Z = front, +X = right. Engines are about 0.5 blocks from the CoM horizontally.
 - Pad: CoM at y ≈ -53.3 when resting. Pad world pose was about (-331.65, -53.36, 44.86) in an early test.
