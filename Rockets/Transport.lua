@@ -43,7 +43,10 @@ local C = {
   FUEL_LAND_V = 30,
   FUEL_LAND_PAD = 20,
   CUT_CONFIRM_T = 2,
-  SELF_DELETE = false,
+  SELF_DELETE = true,
+  OWNERS = {},
+  OWNER_RANGE = 8,
+  RESULT_T = 30,
   TANK_TYPE = "fluid_storage",
   FLARE_SIDE = "top",
   FLARE_PULSE = 1.0,
@@ -320,6 +323,17 @@ function SEC.check(pw)
     if i % 50 == 0 then os.queueEvent("sec") os.pullEvent("sec") end
   end
   return h == C.PASS_HASH
+end
+
+function SEC.owner()
+  if #C.OWNERS == 0 then return true end
+  local det = peripheral.find("playerDetector") or peripheral.find("player_detector")
+  if not det or not det.isPlayerInRange then return false end
+  for _, n in ipairs(C.OWNERS) do
+    local ok, r = pcall(det.isPlayerInRange, C.OWNER_RANGE, n)
+    if ok and r then return true end
+  end
+  return false
 end
 
 function SEC.audit(s)
@@ -1331,6 +1345,15 @@ local function tryLaunch()
 end
 
 local function authorize(what)
+  if not SEC.owner() then
+    SEC.audit(what .. " REFUSED, OWNER NOT NEARBY")
+    clear()
+    header("LOCKED ", colors.red)
+    text(2, 4, "OWNER NOT NEARBY", colors.red)
+    text(2, 6, "STAND WITHIN " .. C.OWNER_RANGE .. " BLOCKS", colors.white)
+    sleep(3)
+    return false
+  end
   while true do
     local l = SEC.lock()
     local now = os.epoch("utc") / 1000
@@ -1828,7 +1851,7 @@ local function main()
   pcall(tune)
   if REMOTE then
     local m = REMOTE.mission
-    if type(m) ~= "table" or not SEC.check(m.password) then
+    if type(m) ~= "table" or not SEC.owner() or not SEC.check(m.password) then
       SEC.audit("REMOTE REFUSED")
       return
     end
@@ -1844,17 +1867,26 @@ local function main()
     end
     return
   end
-  local tgt
-  repeat
-    tgt = inputScreen()
-    if tgt == "EXIT" then
-      local f = fs.open(C.EXIT_FILE, "w")
-      if f then f.close() end
-      return
-    end
-  until countdown(tgt)
-  SEC.audit(string.format("LAUNCH to %d %d %d", math.floor(tgt.x), math.floor(tgt.y), math.floor(tgt.z)))
-  flight(tgt, currentPlan(tel.pos, tgt, mode, climb, true))
+  while true do
+    local tgt
+    repeat
+      tgt = inputScreen()
+      if tgt == "EXIT" then
+        local f = fs.open(C.EXIT_FILE, "w")
+        if f then f.close() end
+        return
+      end
+    until countdown(tgt)
+    SEC.audit(string.format("LAUNCH to %d %d %d", math.floor(tgt.x), math.floor(tgt.y), math.floor(tgt.z)))
+    attI.x, attI.z, sinkI.x, sinkI.z = 0, 0, 0, 0
+    fl.cutArm, fl.abort, msg = nil, false, ""
+    flight(tgt, currentPlan(tel.pos, tgt, mode, climb, true))
+    SEC.audit(fl.result and string.format("LANDED, miss %.1f", fl.result.total) or ("ENDED " .. tostring(fl.cut or fl.phase)))
+    local timer = os.startTimer(C.RESULT_T)
+    repeat
+      local e, a = os.pullEvent()
+    until e == "key" or (e == "timer" and a == timer)
+  end
 end
 
 local ok, err = pcall(parallel.waitForAny, main, telemetry, fuel)
