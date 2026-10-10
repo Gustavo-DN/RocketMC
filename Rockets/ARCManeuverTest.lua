@@ -1,7 +1,7 @@
 local C = {
   ENGINE_TYPE = "liquid_vector_thruster",
   TANK_TYPE = "fluid_storage",
-  ENGINE_ORDER = { 2, 3, 1, 0 },
+  ENGINE_ORDER = { 0, 1, 3, 2 },
   THRUST_FORCE = 2025,
   GRAV = 10.5,
   KP = 1.5,

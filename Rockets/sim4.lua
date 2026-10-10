@@ -108,7 +108,7 @@ peripheral = { getNames = function() return names end,
   hasType = function(n, t) if t == "liquid_vector_thruster" then return n:find("thruster") ~= nil end return t == "fluid_storage" end,
   call = function() return { { amount = tonumber(os.getenv("FUEL") or 900) } } end,
   wrap = function(n)
-    local i = ({ [0] = 4, [1] = 3, [2] = 1, [3] = 2 })[tonumber(n:match("_(%d)$"))]
+    local i = ({ [0] = 1, [1] = 2, [2] = 4, [3] = 3 })[tonumber(n:match("_(%d)$"))]
     local e = E[i]
     return { setThrustNormalized = function(v) e.thr = v end, setVector = function(x, y) e.tx, e.ty = x, y end,
       pullFluid = function() end }
