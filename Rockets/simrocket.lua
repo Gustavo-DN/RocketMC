@@ -47,6 +47,8 @@ S = { pos = { x = 0, y = shuttle and SY or GROUND, z = 0 }, vel = PLANE and { x 
   q = { w = math.cos(h0 / 2), x = 0, y = math.sin(h0 / 2), z = 0 }, attached = shuttle, maxTilt = 0, maxSpin = 0, maxV = 0 }
 local p0 = math.rad(tonumber(os.getenv("PITCH0") or 0))
 if p0 ~= 0 then S.q = qmul(S.q, { w = math.cos(-p0 / 2), x = math.sin(-p0 / 2), y = 0, z = 0 }) end
+local PROT = tonumber(os.getenv("PROT") or 0)
+local QOFF = { w = math.cos(-PROT * math.pi / 4), x = 0, y = math.sin(-PROT * math.pi / 4), z = 0 }
 local Eng = { thr = 0, tx = 0, ty = 0, gx = 0, gy = 0 }
 local function mul3(v, s) return { x = v.x * s, y = v.y * s, z = v.z * s } end
 local function q15(x) return math.floor(x * 15 + 0.5) / 15 end
@@ -191,10 +193,23 @@ peripheral = { wrap = function(s) if s == "bottom" or s == "back" then return en
   call = function() return { { amount = 1000 } } end }
 sublevel = {
   isInPlotGrid = function() return true end,
-  getLogicalPose = function() return { position = { x = S.pos.x, y = S.pos.y, z = S.pos.z }, orientation = { w = S.q.w, x = S.q.x, y = S.q.y, z = S.q.z } } end,
+  getLogicalPose = function()
+    local q = PROT ~= 0 and qmul(S.q, QOFF) or S.q
+    return { position = { x = S.pos.x, y = S.pos.y, z = S.pos.z }, orientation = { w = q.w, x = q.x, y = q.y, z = q.z } }
+  end,
   getLinearVelocity = function() return { x = S.vel.x, y = S.vel.y, z = S.vel.z } end,
-  getAngularVelocity = function() return { x = S.om.x, y = S.om.y, z = S.om.z } end,
-  getInertiaTensor = function() return { { INER, 0, 0 }, { 0, 0.92, 0 }, { 0, 0, INER }, rows = 3, columns = 3 } end,
+  getAngularVelocity = function()
+    if PROT ~= 0 then return qrot({ w = QOFF.w, x = -QOFF.x, y = -QOFF.y, z = -QOFF.z }, S.om) end
+    return { x = S.om.x, y = S.om.y, z = S.om.z }
+  end,
+  getInertiaTensor = function()
+    if PLANE then
+      local a, b = 3.15, 2.25
+      if PROT ~= 0 then a, b = b, a end
+      return { { a, 0, 0 }, { 0, 4.65, 0 }, { 0, 0, b }, rows = 3, columns = 3 }
+    end
+    return { { INER, 0, 0 }, { 0, 0.92, 0 }, { 0, 0, INER }, rows = 3, columns = 3 }
+  end,
   getMass = function() return (S.attached and not os.getenv("NOMASS")) and 60 or MASS end,
 }
 redstone = { setOutput = function(side, v) if os.getenv("DBG") then io.stderr:write(string.format("REDSTONE %s %s T=%.2f\n", side, tostring(v), T)) end end, getSides = function() return { "top", "bottom", "left", "right", "front", "back" } end, getInput = function(side) return os.getenv("RS") ~= nil and side == "top" and T >= REL end }

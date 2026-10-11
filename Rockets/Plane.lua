@@ -25,6 +25,8 @@ C.TURN_RATE = 8
 C.KV = 1.0
 C.ERR_MAX = 0.6
 local FWD = { x = 0, y = 0, z = 1 }
+local RGT = { x = 1, y = 0, z = 0 }
+local axisInfo = {}
 C.MAP_PITCH = -4.37
 C.MAP_YAW = -3.88
 C.KP_A = 4
@@ -91,6 +93,10 @@ C.REL_SIDE = "top"
 C.FLARE_SIDE = "front"
 C.FLARE_PULSE = 1.0
 C.VT_PITCH = 60
+C.VT_FAIL_PITCH = 30
+C.VT_FAIL_T = 1
+C.VT_STUCK_T = 4
+C.VT_STUCK_H = 2
 C.VT_STEPS = 8
 C.VT_STEP_T = 0.25
 C.VT_H = 20
@@ -237,8 +243,11 @@ local function steer(dirW, w, u, om, dt, thr)
   ff.prev = du
   local steps = math.floor(clamp(thr or 0, 0, 1) * 15 + 1e-9)
   if steps < 1 then return 0, 0 end
-  local wb = toBody(w, u, ff.w)
-  local d = unit(toBody(w, u, dirW))
+  local wbb = toBody(w, u, ff.w)
+  local db = unit(toBody(w, u, dirW))
+  local wb = { x = dot(wbb, RGT), y = wbb.y }
+  local d = { x = dot(db, RGT), y = db.y, z = dot(db, FWD) }
+  om = { x = dot(om, RGT), y = om.y }
   local s = math.sqrt(d.x * d.x + d.y * d.y)
   local ex, ey = 0, 0
   if s > 1e-9 then
@@ -339,6 +348,10 @@ local function guideStep(g, pos, vel, nose, dt)
   if g.phase == "VTAKE" then
     steps = math.min(C.VT_STEPS, 1 + math.floor(g.pt / C.VT_STEP_T))
     want = math.rad(90)
+    if (g.pt > C.VT_FAIL_T and math.deg(pitch) < C.VT_FAIL_PITCH) or (g.pt > C.VT_STUCK_T and pos.y - g.start.y < C.VT_STUCK_H) then
+      g.phase, g.throttle, g.tmode = "CUT", 0, "TAKEOFF FAIL"
+      return nil, true
+    end
     if pos.y - g.start.y >= C.VT_H then g.phase, g.pt = "PITCHOVER", 0 end
   elseif g.phase == "PITCHOVER" then
     steps = C.PO_STEPS
@@ -1015,17 +1028,43 @@ local function tune()
   local ok, m = pcall(sublevel.getMass)
   if ok and type(m) == "number" and m > 0 then C.THRUST_ACC = C.THRUST_FORCE / m end
   local ok2, it = pcall(sublevel.getInertiaTensor)
+  axisInfo = { fwd = "z" }
   if ok2 and type(it) == "table" then
-    local a = it[1]
-    local ia = type(a) == "table" and (a[1] or a.x)
-    if type(ia) == "number" then inertiaK = clamp(ia / C.REF_I, C.GAIN_MIN, C.GAIN_MAX) end
+    local function el(i, k) local r = it[i] return type(r) == "table" and (r[k] or r[({ "x", "y", "z" })[k]]) or nil end
+    local ix, iy, iz = el(1, 1), el(2, 2), el(3, 3)
+    if type(ix) == "number" and type(iy) == "number" and type(iz) == "number" then
+      axisInfo.ix, axisInfo.iy, axisInfo.iz = ix, iy, iz
+      axisInfo.tilted = iy < math.max(ix, iz)
+      axisInfo.fwd = ix < iz and "x" or "z"
+      inertiaK = clamp(math.max(ix, iz) / C.REF_I, C.GAIN_MIN, C.GAIN_MAX)
+    end
   end
   return ok and m or nil
 end
 
 local function flight(tgt, pred, why)
   local mass = tune()
-  local start, _, _, v0 = tick()
+  local start, w0, u0, v0 = tick()
+  local ax = axisInfo.fwd == "x" and { x = 1, y = 0, z = 0 } or { x = 0, y = 0, z = 1 }
+  local aw = rotate(w0, u0, ax)
+  local sign = 1
+  local refuse
+  if axisInfo.tilted then
+    refuse = "ASSEMBLED TILTED: RE-ASSEMBLE LEVEL"
+  elseif mode == "SHUTTLE" then
+    if len(v0) > 2 and dot(aw, v0) < 0 then sign = -1 end
+  else
+    if aw.y < 0 then sign = -1 end
+    if math.abs(aw.y) < math.sin(math.rad(C.VT_PITCH)) then refuse = "STAND IT ON ITS TAIL" end
+  end
+  FWD.x, FWD.y, FWD.z = ax.x * sign, 0, ax.z * sign
+  RGT.x, RGT.y, RGT.z = FWD.z, 0, -FWD.x
+  if refuse then
+    fl.phase = refuse
+    drawFlight(start, tgt)
+    sleep(5)
+    return
+  end
   local g = newGuide(start, tgt, mode, climb)
   local tr = newTracker()
   fl.trail, fl.pred, fl.result = {}, pred, nil
@@ -1035,7 +1074,8 @@ local function flight(tgt, pred, why)
     local flog = fs.open(C.FLIGHT_LOG, "w")
     if flog then
       flog.writeLine(string.format("%s TGT %d %d %d CLIMB %d%s", mode, math.floor(tgt.x), math.floor(tgt.y), math.floor(tgt.z), climb, why and (" START " .. why) or ""))
-      flog.writeLine(string.format("FROM %.1f %.1f %.1f VEL %.1f %.1f %.1f MASS %s TACC %.1f GAIN %.2f", start.x, start.y, start.z, v0.x, v0.y, v0.z, tostring(mass), C.THRUST_ACC, inertiaK))
+      flog.writeLine(string.format("FROM %.1f %.1f %.1f VEL %.1f %.1f %.1f MASS %s TACC %.1f GAIN %.2f NOSE %s%s I %s %s %s", start.x, start.y, start.z, v0.x, v0.y, v0.z, tostring(mass), C.THRUST_ACC, inertiaK,
+        (FWD.x + FWD.z) > 0 and "+" or "-", axisInfo.fwd, tostring(axisInfo.ix), tostring(axisInfo.iy), tostring(axisInfo.iz)))
       flog.writeLine("t phase thr speed alt dist dh err_deg gx gy spin wx wy wz steps pitch pitch_cmd vy")
     end
     local cT, cX, cY = g.throttle, 0, 0
