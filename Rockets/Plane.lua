@@ -88,6 +88,48 @@ C.NAV = 3
 C.HOLD_TGO = 0.4
 C.SEP_DELAY = 0.5
 C.REL_SIDE = "top"
+C.VT_PITCH = 60
+C.VT_STEPS = 8
+C.VT_STEP_T = 0.25
+C.VT_H = 20
+C.PO_RATE = 25
+C.PO_STEPS = 6
+C.PO_END_PITCH = 20
+C.PO_V = 45
+C.CLIMB_PITCH = 12
+C.K_HV = 0.3
+C.VY_MAX = 8
+C.K_PVY = 0.012
+C.K_IVY = 0.004
+C.TRIM0 = 8
+C.TRIM_LO = -5
+C.TRIM_HI = 18
+C.PITCH_LIM = 25
+C.PITCH_RATE_C = 15
+C.TURN_RATE = 8
+C.V_FLY = 80
+C.V_APP = 40
+C.SLOW_D = 300
+C.ALIGN_ERR = 45
+C.GA_ERR = 60
+C.GA_HIGH = 35
+C.APP_HIGH = 30
+C.K_STEPS = 0.1
+C.STEPS_TOP = 8
+C.APP_SLOPE = 4
+C.APP_STEPS = 1
+C.APP_LEAD = 150
+C.STEEP_SLOPE = 10
+C.APP_H2 = 40
+C.K_APP_STEPS = 0.3
+C.APP_STEPS_MAX = 6
+C.ALIGN_D = 150
+C.FLARE_H = 4
+C.FLARE_PITCH = 6
+C.TOUCH_H = 1
+C.TOUCH_VY = 4
+C.FLARE_MAX_T = 15
+C.CRUISE_ABOVE = 30
 C.REL_ON_MASS = false
 C.REL_MASS = 0.7
 C.REL_FREEFALL = false
@@ -98,9 +140,9 @@ C.SIM_TIME = 240
 C.SAVE = "rocket.target"
 C.LOG = "rocket.log"
 C.FLIGHT_LOG = "flight.log"
-C.MODES = { "SHUTTLE" }
+C.MODES = { "WATER", "SHUTTLE" }
 local climb = C.CLIMB
-local mode = "SHUTTLE"
+local mode = "WATER"
 
 local engine = peripheral.wrap(C.SIDE_ENGINE)
 if not engine then error("no vector engine on " .. C.SIDE_ENGINE, 0) end
@@ -215,10 +257,12 @@ local function steer(dirW, w, u, om, dt, thr)
 end
 
 local function newGuide(start, tgt, md, cl)
+  local hc = md == "SHUTTLE" and start.y or start.y + cl
   return {
     start = start, tgt = tgt, mode = md, climb = cl,
-    phase = "CRUISE", tmode = "CRUISE", throttle = C.STEPS_START / 15 + 0.003, stepsI = C.STEPS_START, steps = C.STEPS_START,
-    hCmd = math.max(start.y, tgt.y + C.CRUISE_MIN_H), trim = math.rad(C.AOA_START), stuck = 0,
+    phase = md == "SHUTTLE" and "CRUISE" or "VTAKE", tmode = "", pt = 0,
+    throttle = 0, steps = 1, stepsI = 3,
+    hCmd = math.max(hc, tgt.y + C.CRUISE_ABOVE), trim = math.rad(C.TRIM0), stuck = 0,
   }
 end
 
@@ -250,53 +294,90 @@ local function guideStep(g, pos, vel, nose, dt)
   local hx, hz = tgt.x - pos.x, tgt.z - pos.z
   local dh = math.sqrt(hx * hx + hz * hz)
   local sp = len(vel)
-  if g.phase == "CRUISE" then
-    local drop = pos.y - tgt.y
-    if dh < math.max(C.DIVE_MIN_D, sp * C.FINAL_T) or (drop > 0 and atan2(drop, dh) > math.rad(C.GLIDE_ANG + 15)) then
-      g.phase, g.tmode = "DIVE", "DIVE"
+  local hs = math.sqrt(vel.x * vel.x + vel.z * vel.z)
+  local pitch = math.asin(clamp(nose.y, -1, 1))
+  local hgt = pos.y - tgt.y
+  g.pt = g.pt + dt
+  if not g.head then
+    local h
+    if math.deg(pitch) > C.VT_PITCH and g.upb then
+      h = { x = -g.upb.x, y = 0, z = -g.upb.z }
+    elseif hs > 5 then
+      h = { x = vel.x, y = 0, z = vel.z }
+    else
+      h = { x = nose.x, y = 0, z = nose.z }
+    end
+    if len(h) < 1e-3 then h = { x = hx, y = 0, z = hz } end
+    g.head = unit(h)
+    g.pitchCmd = g.phase == "VTAKE" and math.rad(90) or pitch
+  end
+  local function altHold(target, vyff)
+    local vyc = clamp(C.K_HV * (target - pos.y), -C.VY_MAX, C.VY_MAX) + (vyff or 0)
+    g.trim = clamp(g.trim + C.K_IVY * (vyc - vel.y) * dt, math.rad(C.TRIM_LO), math.rad(C.TRIM_HI))
+    return g.trim + C.K_PVY * (vyc - vel.y)
+  end
+  local function speedSteps(vt)
+    g.stepsI = clamp(g.stepsI + 0.05 * (vt - sp) * dt, 1, C.STEPS_TOP)
+    return math.floor(clamp(g.stepsI + C.K_STEPS * (vt - sp), 1, C.STEPS_TOP) + 0.5)
+  end
+  if dh > 1 and (g.phase == "CRUISE" or (g.phase == "APPROACH" and dh > C.ALIGN_D)) then
+    g.head = turnToward(g.head, { x = hx / dh, y = 0, z = hz / dh }, math.rad(C.TURN_RATE) * dt)
+  end
+  local want, steps = g.pitchCmd, g.steps
+  local d2 = C.APP_H2 / math.tan(math.rad(C.APP_SLOPE))
+  local function slopeH(d)
+    if d > d2 then return tgt.y + C.APP_H2 + (d - d2) * math.tan(math.rad(C.STEEP_SLOPE)) end
+    return tgt.y + d * math.tan(math.rad(C.APP_SLOPE))
+  end
+  local herr = 0
+  if dh > 1 and hs > 5 then
+    local c = (vel.x * hx + vel.z * hz) / (hs * dh)
+    herr = math.deg(math.acos(clamp(c, -1, 1)))
+  end
+  if g.phase == "VTAKE" then
+    steps = math.min(C.VT_STEPS, 1 + math.floor(g.pt / C.VT_STEP_T))
+    want = math.rad(90)
+    if pos.y - g.start.y >= C.VT_H then g.phase, g.pt = "PITCHOVER", 0 end
+  elseif g.phase == "PITCHOVER" then
+    steps = C.PO_STEPS
+    want = math.rad(C.CLIMB_PITCH)
+    if (math.deg(pitch) <= C.PO_END_PITCH and hs >= C.PO_V) or g.pt > 15 then
+      g.phase, g.pt, g.trim = "CRUISE", 0, math.rad(C.TRIM0)
+    end
+  elseif g.phase == "CRUISE" then
+    local dApp = math.min(math.max(hgt, 0), C.APP_H2) / math.tan(math.rad(C.APP_SLOPE)) + math.max(hgt - C.APP_H2, 0) / math.tan(math.rad(C.STEEP_SLOPE))
+    local near = dh <= dApp + C.APP_LEAD + C.SLOW_D
+    steps = speedSteps(near and C.V_APP or C.V_FLY)
+    local hRef = math.max(tgt.y + C.APP_H2, math.min(g.hCmd, slopeH(dh)))
+    want = altHold(hRef)
+    if dh <= dApp + C.APP_LEAD and herr < C.ALIGN_ERR and pos.y - slopeH(dh) < C.APP_HIGH then g.phase, g.pt = "APPROACH", 0 end
+  elseif g.phase == "APPROACH" then
+    local slope = dh > d2 and C.STEEP_SLOPE or C.APP_SLOPE
+    local href = math.min(slopeH(dh), g.hCmd)
+    if dh > C.ALIGN_D and (herr > C.GA_ERR or pos.y - href > C.GA_HIGH) then
+      g.phase, g.pt = "CRUISE", 0
+      g.goArounds = (g.goArounds or 0) + 1
+    end
+    g.stepsI = clamp(g.stepsI + 0.05 * (C.V_APP - sp) * dt, C.APP_STEPS, C.APP_STEPS_MAX)
+    steps = math.floor(clamp(g.stepsI + C.K_STEPS * (C.V_APP - sp) + C.K_APP_STEPS * math.max(href - pos.y, 0), C.APP_STEPS, C.APP_STEPS_MAX) + 0.5)
+    want = altHold(href, -hs * math.tan(math.rad(slope)))
+    if hgt <= C.FLARE_H then g.phase, g.pt = "FLARE", 0 end
+  elseif g.phase == "FLARE" then
+    steps = C.APP_STEPS
+    want = math.rad(C.FLARE_PITCH)
+    if (hgt <= C.TOUCH_H and vel.y > -C.TOUCH_VY) or g.pt > C.FLARE_MAX_T then
+      g.phase, g.throttle, g.tmode = "TOUCHDOWN", 0, "OFF"
+      return nil, true
     end
   end
-  if g.phase == "CRUISE" then
-    local dv = C.V_CRUISE - sp
-    local smin = clamp(math.ceil(sp / C.STEP_PER_V), 1, C.STEPS_MIN)
-    g.stepsI = clamp(g.stepsI + C.KI_V * dv * dt, smin, C.STEPS_MAX)
-    g.steps = math.floor(clamp(g.stepsI + C.K_V * dv, smin, C.STEPS_MAX) + 0.5)
-    g.throttle = g.steps / 15 + 0.003
-    local hs = math.sqrt(vel.x * vel.x + vel.z * vel.z)
-    local gam = atan2(vel.y, math.max(hs, 1))
-    local slopeH = tgt.y + dh * math.tan(math.rad(C.GLIDE_ANG))
-    local onSlope = slopeH < g.hCmd
-    if onSlope then g.tmode = "GLIDE" end
-    local gcmd = (onSlope and -math.rad(C.GLIDE_ANG) or 0) + clamp(C.K_H * ((onSlope and slopeH or g.hCmd) - pos.y), -math.rad(C.GAMMA_MAX), math.rad(C.GAMMA_MAX))
-    g.trim = clamp(g.trim + C.K_TRIM * (gcmd - gam) * dt, math.rad(C.TRIM_MIN), math.rad(C.TRIM_MAX))
-    local pitch = clamp(gcmd + g.trim, -math.rad(C.PITCH_MAX), math.rad(C.PITCH_MAX))
-    local pr = math.rad(C.PITCH_RATE) * dt
-    if g.pitchCmd then pitch = clamp(pitch, g.pitchCmd - pr, g.pitchCmd + pr) end
-    local cur = hs > 5 and { x = vel.x / hs, y = 0, z = vel.z / hs } or unit({ x = nose.x, y = 0, z = nose.z })
-    local want = dh > 1e-6 and { x = hx / dh, y = 0, z = hz / dh } or cur
-    local hd = turnToward(cur, want, math.rad(C.YAW_MAX))
-    g.pitchCmd = pitch
-    return { x = hd.x * math.cos(pitch), y = math.sin(pitch), z = hd.z * math.cos(pitch) }
-  end
-  g.steps = clamp(math.ceil(sp / C.STEP_PER_V), 1, C.DIVE_STEPS)
-  g.throttle = g.steps / 15 + 0.003
-  local r = sub(tgt, add(pos, mul(nose, C.NOSE_OFFSET)))
-  local dn = len(r)
-  local vc = dn > 1e-6 and dot(vel, r) / dn or 0
-  local closing = g.lastDn and dn < g.lastDn
-  g.lastDn = dn
-  if sp < C.STUCK_V then g.stuck = g.stuck + dt else g.stuck = 0 end
-  if dn < C.HIT_RADIUS or g.stuck > C.STUCK_T or (vc > 1 and dn / vc < C.CUT_TIME) or (closing == false and dn < 20) then
-    g.phase, g.throttle, g.tmode = "TOUCHDOWN", 0, "OFF"
-    return nil, true
-  end
-  local rh = mul(r, 1 / math.max(dn, 1e-6))
-  local vh = sp > 1 and mul(vel, 1 / sp) or nose
-  local want = unit(add(rh, mul(sub(rh, vh), C.DIVE_K)))
-  want = unit(add(want, { x = 0, y = C.GRAV * C.DIVE_GRAV_T / math.max(sp, 20), z = 0 }))
-  if dn / math.max(vc, 1) < C.HOLD_TGO and g.held then return g.held end
-  g.held = want
-  return want
+  local tall = g.phase == "VTAKE" or g.phase == "PITCHOVER"
+  local lim = math.rad(tall and 90 or C.PITCH_LIM)
+  local pr = math.rad(g.phase == "PITCHOVER" and C.PO_RATE or C.PITCH_RATE_C) * dt
+  g.pitchCmd = clamp(clamp(want, -lim, lim), g.pitchCmd - pr, g.pitchCmd + pr)
+  g.steps, g.tmode = steps, g.phase
+  g.throttle = steps / 15 + 0.003
+  local p = g.pitchCmd
+  return { x = g.head.x * math.cos(p), y = math.sin(p), z = g.head.z * math.cos(p) }
 end
 
 local function newTracker() return { bestD = math.huge } end
@@ -605,7 +686,7 @@ local function planKey(start, tgt, md, cl)
 end
 
 local function currentPlan(start, tgt, md, cl, now)
-  if md == "SHUTTLE" then return nil end
+  if md then return nil end
   local key = planKey(start, tgt, md, cl)
   if not key then return nil end
   if key == predKey then return predVal end
@@ -640,8 +721,8 @@ local function drawInput()
   local tgt = target()
   local pl = currentPlan(p, tgt, fields[5].value, climb)
   plot(p, tgt, nil, pl, nil)
-  if p and tgt and fields[5].value == "SHUTTLE" then
-    text(PX - 1, 17, "PLAN AFTER RELEASE", colors.gray)
+  if p and tgt then
+    text(PX - 1, 17, fields[5].value == "SHUTTLE" and "WAITS FOR RELEASE" or "STAND IT ON ITS TAIL", colors.gray)
   elseif p and tgt and not pl then
     text(PX - 1, 17, "PLANNING...", colors.gray)
   end
@@ -893,7 +974,7 @@ local fl = { phase = "IGNITION", dx = 0, dy = 0, dz = 0, trail = {} }
 
 local function drawFlight(start, tgt)
   clear()
-  local colorsFor = { IGNITION = colors.yellow, ASCENT = colors.orange, SEPARATE = colors.lightBlue, CRUISE = colors.cyan, DIVE = colors.magenta, TOUCHDOWN = colors.red, ABORT = colors.red, CUT = colors.red }
+  local colorsFor = { IGNITION = colors.yellow, ASCENT = colors.orange, SEPARATE = colors.lightBlue, CRUISE = colors.cyan, VTAKE = colors.orange, PITCHOVER = colors.yellow, APPROACH = colors.magenta, FLARE = colors.lime, TOUCHDOWN = colors.red, ABORT = colors.red, CUT = colors.red }
   header(fl.phase .. " ", colorsFor[fl.phase] or colors.white)
   local p = fl.pos
   text(2, 3, "FLIGHT " .. mode, colors.yellow)
@@ -969,10 +1050,11 @@ local function flight(tgt, pred, why)
       local dt = clamp(now - last, 0.01, 0.5)
       last = now
       local nose = rotate(w, u, FWD)
+      g.upb = rotate(w, u, UP)
       local dir, done = guideStep(g, pos, vel, nose, dt)
       fl.phase, fl.tmode, fl.thr = g.phase, g.tmode, g.throttle
       fl.pos, fl.speed, fl.dist = pos, len(vel), len(sub(tgt, pos))
-      if g.phase == "DIVE" then track(tr, contactPoint(pos, nose), tgt) end
+      if g.phase == "APPROACH" or g.phase == "FLARE" then track(tr, pos, tgt) end
       if now >= nextTrail then
         fl.trail[#fl.trail + 1] = pos
         nextTrail = now + 0.25
@@ -987,7 +1069,7 @@ local function flight(tgt, pred, why)
       local errNow = dir and math.deg(math.acos(clamp(dot(nose, unit(dir)), -1, 1))) or 0
       local low = pos.y < math.min(start.y, tgt.y) + C.CUT_LOW
       if low and errNow > C.CUT_ERR then badT = badT + dt else badT = 0 end
-      if g.phase ~= "IGNITION" and g.phase ~= "SEPARATE" and len(vel) < C.CUT_STILL_V then stillT = stillT + dt else stillT = 0 end
+      if g.phase ~= "VTAKE" and len(vel) < C.CUT_STILL_V then stillT = stillT + dt else stillT = 0 end
       if not done and (badT > C.CUT_ERR_T or stillT > C.CUT_STILL_T) then
         g.phase, g.throttle, g.tmode = "CUT", 0, badT > C.CUT_ERR_T and "TILT" or "STILL"
         fl.phase, fl.tmode = g.phase, g.tmode
@@ -1013,7 +1095,7 @@ local function flight(tgt, pred, why)
         while os.clock() < stop and not tr.hit do
           local ok, p2, w2, u2, v2 = pcall(tick)
           if not ok then break end
-          track(tr, contactPoint(p2, rotate(w2, u2, FWD)), tgt)
+          track(tr, p2, tgt)
           fl.pos, fl.speed, fl.dist = p2, len(v2), len(sub(tgt, p2))
           fl.trail[#fl.trail + 1] = p2
           still = len(v2) < 0.5 and still + 1 or 0

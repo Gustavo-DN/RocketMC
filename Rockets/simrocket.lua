@@ -17,6 +17,8 @@ local KSIDE = tonumber(os.getenv("KSIDE") or 0.5)
 local LMAX = tonumber(os.getenv("LMAX") or 1e9)
 local KIND = tonumber(os.getenv("KIND") or 0)
 local FRIC = tonumber(os.getenv("FRIC") or 2)
+local DSAT = tonumber(os.getenv("DSAT") or 0)
+local DV0 = tonumber(os.getenv("DV0") or 55)
 local FRICV = tonumber(os.getenv("FRICV") or 0)
 local GHOLD = tonumber(os.getenv("GHOLD") or 0)
 local FWD = PLANE and { x = 0, y = 0, z = 1 } or { x = 0, y = 1, z = 0 }
@@ -101,6 +103,10 @@ local function phys(dt)
     if ly > LMAX then ly = LMAX elseif ly < -LMAX then ly = -LMAX end
     local l = qrot(S.q, { x = -KSIDE * bv.x, y = ly, z = 0 })
     local sp = math.sqrt(S.vel.x ^ 2 + S.vel.y ^ 2 + S.vel.z ^ 2)
+    if DSAT > 0 and sp > 1 then
+      local dd = DSAT * (1 - math.exp(-sp / DV0)) / sp
+      l = { x = l.x - dd * S.vel.x, y = l.y - dd * S.vel.y, z = l.z - dd * S.vel.z }
+    end
     if KIND > 0 and sp > 1 then
       local di = KIND * ly * ly / math.max(sp, 10) / sp
       l = { x = l.x - di * S.vel.x, y = l.y - di * S.vel.y, z = l.z - di * S.vel.z }
