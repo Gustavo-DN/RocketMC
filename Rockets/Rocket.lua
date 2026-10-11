@@ -31,6 +31,11 @@ local CUT_TIME = 0.1
 local STUCK_V = 2
 local STUCK_T = 1
 local NOSE_OFFSET = 3
+local CUT_ERR = 100
+local CUT_ERR_T = 2
+local CUT_LOW = 15
+local CUT_STILL_V = 1
+local CUT_STILL_T = 3
 local GRAV = 10.5
 local DRAG = 0.13
 local THRUST_ACC = 77.6
@@ -835,7 +840,7 @@ local fl = { phase = "IGNITION", dx = 0, dy = 0, dz = 0, trail = {} }
 
 local function drawFlight(start, tgt)
   clear()
-  local colorsFor = { IGNITION = colors.yellow, ASCENT = colors.orange, SEPARATE = colors.lightBlue, CRUISE = colors.cyan, TOUCHDOWN = colors.red, ABORT = colors.red }
+  local colorsFor = { IGNITION = colors.yellow, ASCENT = colors.orange, SEPARATE = colors.lightBlue, CRUISE = colors.cyan, TOUCHDOWN = colors.red, ABORT = colors.red, CUT = colors.red }
   header(fl.phase .. " ", colorsFor[fl.phase] or colors.white)
   local p = fl.pos
   text(2, 3, "FLIGHT " .. mode, colors.yellow)
@@ -886,6 +891,7 @@ local function flight(tgt, pred, why)
       flog.writeLine("t phase thr speed alt dist dh err_deg gx gy spin")
     end
     local cT, cX, cY = g.throttle, 0, 0
+    local badT, stillT = 0, 0
     while true do
       if fl.abort then
         if flog then flog.close() flog = nil end
@@ -913,8 +919,18 @@ local function flight(tgt, pred, why)
       else
         fl.gx, fl.gy = 0, 0
       end
+      local errNow = dir and math.deg(math.acos(clamp(dot(nose, unit(dir)), -1, 1))) or 0
+      local low = pos.y < math.min(start.y, tgt.y) + CUT_LOW
+      if low and errNow > CUT_ERR then badT = badT + dt else badT = 0 end
+      if g.phase ~= "IGNITION" and g.phase ~= "SEPARATE" and len(vel) < CUT_STILL_V then stillT = stillT + dt else stillT = 0 end
+      if not done and (badT > CUT_ERR_T or stillT > CUT_STILL_T) then
+        g.phase, g.throttle, g.tmode = "CUT", 0, badT > CUT_ERR_T and "TILT" or "STILL"
+        fl.phase, fl.tmode = g.phase, g.tmode
+        if flog then flog.writeLine(string.format("CUT %s %.2f", g.tmode, now - t0)) end
+        done = true
+      end
       if flog and now >= nextLog then
-        local err = dir and math.deg(math.acos(clamp(dot(nose, unit(dir)), -1, 1))) or 0
+        local err = errNow
         local dhx, dhz = tgt.x - pos.x, tgt.z - pos.z
         flog.writeLine(string.format("%.2f %s %.2f %.1f %.1f %.1f %.1f %.1f %+.2f %+.2f %.2f",
           now - t0, g.phase, g.throttle, len(vel), pos.y, len(sub(tgt, pos)), math.sqrt(dhx * dhx + dhz * dhz), err, fl.gx, fl.gy, len(om)))

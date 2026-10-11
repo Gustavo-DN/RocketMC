@@ -94,7 +94,7 @@ end
 local function advance(dt)
   if T > TMAX then error("SIM TIME LIMIT", 0) end
   local n = math.floor(dt / 0.05 + 0.5)
-  for _ = 1, math.max(n, 1) do phys(0.05) T = T + 0.05 end
+  for _ = 1, math.max(n, 1) do if APPLYQ then APPLYQ() end phys(0.05) T = T + 0.05 end
 end
 sleep = function(s) advance(s) end
 os.clock = function() return T end
@@ -105,7 +105,18 @@ os.startTimer = function() return 1 end
 os.queueEvent = function() end
 parallel = { waitForAll = function(...) for _, f in ipairs({ ... }) do f() end advance(0.05) end,
   waitForAny = function(f) f() end }
-local engine = { setThrustNormalized = function(v) Eng.thr = v end, setVector = function(x, y) Eng.tx, Eng.ty = x, y end, pullFluid = function() end }
+local LAG = tonumber(os.getenv("LAG") or 0)
+local Q = {}
+local function push(k, v)
+  if LAG == 0 then Eng[k] = v return end
+  Q[#Q + 1] = { t = T + LAG * 0.05, k = k, v = v }
+end
+APPLYQ = function()
+  local keep = {}
+  for _, q in ipairs(Q) do if q.t <= T + 1e-9 then Eng[q.k] = q.v else keep[#keep + 1] = q end end
+  Q = keep
+end
+local engine = { setThrustNormalized = function(v) push("thr", v) end, setVector = function(x, y) push("tx", x) push("ty", y) end, pullFluid = function() end }
 peripheral = { wrap = function(s) if s == "bottom" then return engine end end,
   call = function() return { { amount = 1000 } } end }
 sublevel = {
