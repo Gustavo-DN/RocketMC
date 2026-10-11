@@ -92,6 +92,11 @@ C.SEP_DELAY = 0.5
 C.REL_SIDE = "top"
 C.FLARE_SIDE = "front"
 C.FLARE_PULSE = 1.0
+C.IMPACT_DECEL = 20
+C.IMPACT_WIN = 0.1
+C.IMPACT_SINK = 1.5
+C.IMPACT_STOP_V = 5
+C.IMPACT_WAIT = 8
 C.VT_PITCH = 60
 C.VT_FAIL_PITCH = 30
 C.VT_FAIL_T = 1
@@ -1136,30 +1141,51 @@ local function flight(tgt, pred, why)
         nextLog = now + 0.1
       end
       if done then
-        if flog then flog.close() flog = nil end
         cutEngine()
         fl.thr, fl.gx, fl.gy = 0, 0, 0
         track(tr, contactPoint(pos, nose), tgt)
         local flareOff
-        if g.phase == "TOUCHDOWN" and C.FLARE_SIDE then
-          pcall(redstone.setOutput, C.FLARE_SIDE, true)
-          flareOff = os.clock() + C.FLARE_PULSE
-        end
+        local waitImpact = g.phase == "TOUCHDOWN" and C.FLARE_SIDE
         local cutSpeed, cutTime = len(vel), now - t0
-        local stop, still = os.clock() + 4, 0
-        while os.clock() < stop and not tr.hit do
+        local t1 = os.clock()
+        local stop, still, hist, vyPrev = t1 + C.IMPACT_WAIT, 0, { { t = t1, v = len(vel) } }, vel.y
+        while os.clock() < stop do
           if flareOff and os.clock() >= flareOff then
             pcall(redstone.setOutput, C.FLARE_SIDE, false)
             flareOff = nil
+            if not waitImpact then break end
           end
           local ok, p2, w2, u2, v2 = pcall(tick)
           if not ok then break end
+          local tn, sp2 = os.clock(), len(v2)
           track(tr, p2, tgt)
-          fl.pos, fl.speed, fl.dist = p2, len(v2), len(sub(tgt, p2))
+          fl.pos, fl.speed, fl.dist = p2, sp2, len(sub(tgt, p2))
           fl.trail[#fl.trail + 1] = p2
-          still = len(v2) < 0.5 and still + 1 or 0
-          if still > 10 then break end
+          hist[#hist + 1] = { t = tn, v = sp2 }
+          local i = #hist
+          while i > 1 and tn - hist[i - 1].t < C.IMPACT_WIN do i = i - 1 end
+          local h0 = hist[i > 1 and i - 1 or 1]
+          local dec = tn > h0.t and (h0.v - sp2) / (tn - h0.t) or 0
+          local why
+          if waitImpact then
+            if dec > C.IMPACT_DECEL then why = "DECEL"
+            elseif vyPrev < -C.IMPACT_SINK and v2.y > -0.5 and p2.y - tgt.y < 2 then why = "SINK STOP"
+            elseif sp2 < C.IMPACT_STOP_V then why = "SLOW"
+            elseif tn >= stop - 0.05 then why = "TIMEOUT" end
+          end
+          if flog then flog.writeLine(string.format("%.2f %s %.1f %.1f %+.1f %.1f", tn - t1 + cutTime, why and "IMPACT" or "AFTER", sp2, p2.y, v2.y, dec)) end
+          if why then
+            waitImpact = false
+            pcall(redstone.setOutput, C.FLARE_SIDE, true)
+            flareOff = tn + C.FLARE_PULSE
+            fl.phase = "SPLASH " .. why
+            if flog then flog.writeLine(string.format("FLARE %s at %.2f s after touchdown, speed %.1f", why, tn - t1, sp2)) end
+          end
+          vyPrev = v2.y
+          still = sp2 < 0.5 and still + 1 or 0
+          if still > 10 and not flareOff and not waitImpact then break end
         end
+        if flog then flog.close() flog = nil end
         if flareOff then
           sleep(math.max(0, flareOff - os.clock()))
           pcall(redstone.setOutput, C.FLARE_SIDE, false)
