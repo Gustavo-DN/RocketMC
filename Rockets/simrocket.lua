@@ -17,6 +17,8 @@ local KSIDE = tonumber(os.getenv("KSIDE") or 0.5)
 local LMAX = tonumber(os.getenv("LMAX") or 1e9)
 local KIND = tonumber(os.getenv("KIND") or 0)
 local FRIC = tonumber(os.getenv("FRIC") or 2)
+local FRICV = tonumber(os.getenv("FRICV") or 0)
+local GHOLD = tonumber(os.getenv("GHOLD") or 0)
 local FWD = PLANE and { x = 0, y = 0, z = 1 } or { x = 0, y = 1, z = 0 }
 local INER = tonumber(os.getenv("INERTIA") or (PLANE and 3.15 or 15.57))
 local TACC = tonumber(os.getenv("TACC") or 427 / MASS)
@@ -73,7 +75,13 @@ local function phys(dt)
     local px, py = -KW * bv.y, KW * bv.x
     local pm = math.sqrt(px * px + py * py)
     if pm > TQMAX then px, py = px * TQMAX / pm, py * TQMAX / pm end
-    S.om.x = S.om.x + (MP * Eng.gy * steps + px - DAMP * S.om.x) * dt
+    local axp = MP * Eng.gy * steps + px - DAMP * S.om.x
+    if S.onGround and GHOLD > 0 then
+      if axp < 0 then axp = math.min(0, axp + GHOLD) end
+      if S.om.x < 0 and axp >= 0 then S.om.x = 0 end
+    end
+    S.onGround = false
+    S.om.x = S.om.x + axp * dt
     S.om.y = S.om.y + (MY * Eng.gx * steps + py - DAMP * S.om.y) * dt
     S.om.z = S.om.z * (1 - 2 * dt)
   else
@@ -125,10 +133,11 @@ local function phys(dt)
       end
       local hs = math.sqrt(S.vel.x ^ 2 + S.vel.z ^ 2)
       if hs > 0 then
-        local k = math.max(0, hs - FRIC * dt) / hs
+        local k = math.max(0, hs - (FRIC + FRICV * hs) * dt) / hs
         S.vel.x, S.vel.z = S.vel.x * k, S.vel.z * k
       end
       S.om.x, S.om.z = S.om.x * 0.5, S.om.z * 0.5
+      S.onGround = true
       local nw = qrot(S.q, FWD)
       if nw.y < 0 and math.abs(nw.y) > 0.05 then S.om.x = S.om.x + 2 * dt end
     else

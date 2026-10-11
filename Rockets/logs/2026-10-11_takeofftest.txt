@@ -1,0 +1,11 @@
+TAKEOFF TEST Sat Oct 10 23:08:11 2026
+THRUSTER back
+INERTIA {{3.154405390111767,0,1.0147760409751072e-10,},{0,4.6544053914735688,0,},{1.0147760409751072e-10,0,2.2500000013618009,},columns=3,rows=3,}
+START ENTER at 194.0 -59.6 191.6 heading -54 deg  MASS 4.5
+ROTATE at 40.0 m/s after 5.6 s, rolled 110 blocks
+GROUND ROLL 1 step(s): acceleration 0.92 m/s2 (thrust alone ~3.3), speed 0.0 -> 0.8
+GROUND ROLL 2 step(s): acceleration 8.45 m/s2 (thrust alone ~6.6), speed 1.0 -> 9.3
+GROUND ROLL 3 step(s): acceleration 12.51 m/s2 (thrust alone ~9.9), speed 9.7 -> 21.8
+GROUND ROLL 4 step(s): acceleration 7.01 m/s2 (thrust alone ~13.2), speed 22.3 -> 40.0
+MAX SPIN 0.02 rad/s
+END rotated but no liftoff in 10 s

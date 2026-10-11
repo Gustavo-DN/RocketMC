@@ -13,12 +13,19 @@ local C = {
   ERR_MAX = 0.6,
   GMAX = 0.9,
   COUNTDOWN = 3,
-  ROLL_STEPS = 4,
-  ROLL_STEP_T = 1.0,
+  ROLL_STEPS = 8,
+  ROLL_STEP_T = 0.5,
   ROLL_MAX_T = 30,
   ROLL_MAX_D = 400,
   ROLL_PITCH = 0,
-  VR = 40,
+  VR = 45,
+  KICK_G = 1.0,
+  KICK_G0 = 0.2,
+  KICK_RAMP = 0.6,
+  ROT_RATE = 0.25,
+  KD_ROT = 8,
+  ROT_KD_T = 3,
+  KICK_DONE = 3,
   ROTATE_PITCH = 10,
   ROTATE_RATE = 5,
   LIFTOFF_H = 1.0,
@@ -164,6 +171,8 @@ local flog
 
 local I = { x = 0, y = 0 }
 
+local KD = C.KD
+
 local function hold(w, u, om, head, pitch, steps, dt)
   local d = { x = head.x * math.cos(pitch), y = math.sin(pitch), z = head.z * math.cos(pitch) }
   local b = toBody(w, u, d)
@@ -178,7 +187,7 @@ local function hold(w, u, om, head, pitch, steps, dt)
   I.x = clamp(I.x + ex * dt, -C.IMAX, C.IMAX)
   I.y = clamp(I.y + ey * dt, -C.IMAX, C.IMAX)
   local st = math.max(steps, 1)
-  local ax = C.KP * ex + C.KI * I.x - C.KD * om.x
+  local ax = C.KP * ex + C.KI * I.x - KD * om.x
   local ay = C.KP * ey + C.KI * I.y - C.KD * om.y
   local gy = clamp(ax / (C.MAP_PITCH * st), -C.GMAX, C.GMAX)
   local gx = clamp(ay / (C.MAP_YAW * st), -C.GMAX, C.GMAX)
@@ -294,6 +303,19 @@ local function main()
     elseif phase == "ROTATE" then
       steps = C.ROLL_STEPS
       want = math.rad(C.ROTATE_PITCH)
+      local wasKick = R.kick
+      R.kick = hgt < C.LIFTOFF_H and math.deg(pitch) < C.ROTATE_PITCH - 1
+      local rate = -om.x
+      R.kickG = R.kickG or C.KICK_G0
+      if rate < C.ROT_RATE * 0.5 then
+        R.kickG = R.kickG + C.KICK_RAMP * dt
+      elseif rate > C.ROT_RATE then
+        R.kickG = 0
+      end
+      R.kickG = clamp(R.kickG, 0, C.KICK_G)
+      if wasKick and not R.kick then I.x = 0 end
+      if R.kick and not R.kicked then R.kicked = true note(string.format("KICK at %.1f m/s", sp)) end
+      if math.deg(pitch) >= C.KICK_DONE and not R.noseUp then R.noseUp = true note(string.format("NOSE UP %.1f deg at %.1f m/s, %.1f s after rotate", math.deg(pitch), sp, pt)) end
       if hgt > C.LIFTOFF_H and vel.y > 0.3 then
         phase, pt = "CLIMB", 0
         R.liftV, R.liftD = sp, len(sub(pos, p0))
@@ -303,6 +325,7 @@ local function main()
         break
       end
     elseif phase == "CLIMB" then
+      R.kick = false
       steps = C.CLIMB_STEPS
       want = math.rad(C.CLIMB_PITCH)
       if hgt + math.max(vel.y, 0) * C.LEVEL_LEAD_T >= C.CRUISE_H then trim = pitch phase, pt = "LEVEL", 0 note(string.format("CRUISE HEIGHT +%.0f at %.1f s, %.1f m/s", hgt, T, sp)) end
@@ -368,6 +391,7 @@ local function main()
         break
       end
     end
+    KD = (phase == "ROTATE" or (phase == "CLIMB" and pt < C.ROT_KD_T)) and C.KD_ROT or C.KD
     local pr = math.rad(C.PITCH_RATE) * dt
     pitchCmd = clamp(clamp(want, -math.rad(C.PITCH_MAX), math.rad(C.PITCH_MAX)), pitchCmd - pr, pitchCmd + pr)
     if phase == "ROLLOUT" then
@@ -375,6 +399,7 @@ local function main()
     else
       cmdThr = steps / 15 + 0.003
       cmdX, cmdY = hold(w, u, om, head, pitchCmd, steps, dt)
+      if phase == "ROTATE" and R.kick then cmdY = math.max(cmdY, R.kickG) end
     end
     prevV = hs
     flog.writeLine(string.format("%.2f %s %d %+.2f %+.2f %.1f %.1f %.1f %+.2f %+.2f %+.2f %.1f %+.1f %+.1f %+.1f %+.1f %.0f %.0f %+.3f %+.3f %+.3f",
