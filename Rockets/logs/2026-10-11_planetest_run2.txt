@@ -1,0 +1,22 @@
+PLANE TEST Sat Oct 10 22:12:51 2026
+THRUSTER back
+INERTIA {{3.15440539822023,-2.0414556908237396e-08,-3.0020111903283908e-08,},{-2.0414556908237396e-08,4.6544054033362947,1.3760142735216417e-08,},{-3.0020111903283908e-08,1.3760142735216417e-08,2.2500000051167417,},columns=3,rows=3,}
+START MANUAL, free after 9.8 s  MASS 4.5
+FIRST body velocity -0.559 +0.461 +17.264  world-up in body +0.000 +1.000 -0.002
+COAST  air+thrust force/mass in body +0.122 +10.056 +3.491  world acc +3.467 -0.456 +0.646  speed 20.1
+COAST1 air+thrust force/mass in body +0.239 +0.981 -8.075  world acc -7.141 -6.581 -2.131  speed 39.0
+BURN1  air+thrust force/mass in body +0.909 +0.835 -4.285  world acc -2.739 -7.410 -1.362  speed 36.9
+COAST2 air+thrust force/mass in body +0.763 +2.619 -9.711  world acc -4.680 -1.651 -1.406  speed 39.0
+BURN2  air+thrust force/mass in body +0.149 +2.211 -3.070  world acc -0.103 -6.782 -0.088  speed 40.5
+COAST3 air+thrust force/mass in body -0.094 +1.431 -14.737  world acc -5.603 +3.131 -1.494  speed 44.1
+BURN3  air+thrust force/mass in body -0.169 +1.412 -4.614  world acc -0.659 -5.749 -0.029  speed 42.7
+HOLD   air+thrust force/mass in body -0.261 -2.516 -25.473  world acc -5.127 +14.998 -1.392  speed 20.6
+THRUST step 1 (0.07): +0.670 -0.146 +3.790  => 3.9 m/s2, forward axis in body = +0.174 -0.038 +0.984
+THRUST step 2 (0.14): -0.613 -0.409 +6.641  => 6.7 m/s2
+THRUST step 3 (0.20): -0.075 -0.020 +10.124  => 10.1 m/s2
+GIMBAL MAP at throttle 0.07 (rad/s2 per unit):
+  ang_x = +0.15*gx -4.37*gy +0.22
+  ang_y = -3.88*gx +0.14*gy +0.08
+  ang_z = +0.01*gx +0.00*gy -0.00
+MAX SPIN 2.65 rad/s
+END stopped at 14.0 s
