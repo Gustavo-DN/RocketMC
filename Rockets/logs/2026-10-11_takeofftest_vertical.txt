@@ -1,0 +1,16 @@
+TAKEOFF TEST Sat Oct 10 23:21:19 2026
+THRUSTER back
+INERTIA {{3.2303602540168317,0,1.0147760409751072e-10,},{0,4.654405394267533,0.28862847285719673,},{1.0147760409751072e-10,0.28862847285719673,2.325954862472897,},columns=3,rows=3,}
+START ENTER at -772.1 -58.4 891.6 heading -55 deg  MASS 4.5
+VERTICAL TAKEOFF (tail-sitter)
+LIFTOFF (vertical) at 1.0 s with 5 steps
+PITCHOVER at +31, 32.1 m/s up
+LEVEL FLIGHT after pitch-over: 62.0 m/s, height +127, 5.4 s
+LEVEL: 55.5 m/s at 4 steps, pitch -3.7, height +106.5
+SLOW: 1 step(s) for 2.3 s, 30.0 m/s, pitch +5.4, height +101.5, slowest at height inf m/s
+TURN: 180 deg in 22.5 s (command 8 deg/s), max bank 31
+APPROACH from height +19.8 at 56.5 m/s
+TOUCHDOWN at 21.6 m/s, sink -3.3 m/s (flare started at 21.9 m/s, sink -4.0)
+STOPPED 30 blocks after touchdown
+MAX SPIN 2.21 rad/s
+END landed and stopped
