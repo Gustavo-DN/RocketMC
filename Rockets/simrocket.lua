@@ -43,6 +43,8 @@ local h0 = math.rad(tonumber(os.getenv("HEAD") or 20))
 local shuttle = MODE == "SHUTTLE"
 S = { pos = { x = 0, y = shuttle and SY or GROUND, z = 0 }, vel = PLANE and { x = SV * math.sin(h0), y = tonumber(os.getenv("SVY") or 0), z = SV * math.cos(h0) } or { x = 0, y = shuttle and SV or 0, z = 0 }, om = { x = 0, y = 0, z = 0 },
   q = { w = math.cos(h0 / 2), x = 0, y = math.sin(h0 / 2), z = 0 }, attached = shuttle, maxTilt = 0, maxSpin = 0, maxV = 0 }
+local p0 = math.rad(tonumber(os.getenv("PITCH0") or 0))
+if p0 ~= 0 then S.q = qmul(S.q, { w = math.cos(-p0 / 2), x = math.sin(-p0 / 2), y = 0, z = 0 }) end
 local Eng = { thr = 0, tx = 0, ty = 0, gx = 0, gy = 0 }
 local function mul3(v, s) return { x = v.x * s, y = v.y * s, z = v.z * s } end
 local function q15(x) return math.floor(x * 15 + 0.5) / 15 end
@@ -209,7 +211,6 @@ local REMOTE = { mission = { mode = MODE, x = TX, y = TY, z = TZ, climb = tonumb
 local ok, err = pcall(loadfile(arg[1]), REMOTE)
 local sp = S.splash
 if os.getenv("DBG") and sp then real(string.format("SPLASH tip %.1f %.1f center %.1f %.1f", sp.px, sp.pz, sp.cx, sp.cz)) end
-if PLANE and S.touch then real(string.format("TOUCH t=%.1f vy=%.1f v=%.1f", S.touch.t, S.touch.vy, S.touch.v)) end
 real(string.format("%s %s ok=%s%s end_t=%.1f rel_t=%s splash_t=%s miss=%s splash_v=%s path_angle=%s crash=%s maxV=%.0f maxSpin=%.2f result_miss=%s",
   MODE, arg[1], tostring(ok), ok and "" or (" " .. tostring(err)), T, S.relT and string.format("%.1f", S.relT) or "-",
   sp and string.format("%.1f", sp.t) or "-", sp and string.format("%.1f", sp.miss) or "-", sp and string.format("%.0f", sp.v) or "-",

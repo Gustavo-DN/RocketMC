@@ -13,6 +13,14 @@ local C = {
   ERR_MAX = 0.6,
   GMAX = 0.9,
   COUNTDOWN = 3,
+  VT_PITCH = 60,
+  VT_STEPS = 8,
+  VT_STEP_T = 0.25,
+  VT_H = 30,
+  PO_RATE = 15,
+  PO_STEPS = 6,
+  PO_END_PITCH = 20,
+  PO_V = 45,
   ROLL_STEPS = 8,
   ROLL_STEP_T = 0.5,
   ROLL_MAX_T = 30,
@@ -232,9 +240,11 @@ local function main()
   if not why then R.reason = "cancelled" return end
   local p0, w0, u0 = tick(false)
   local f0 = rotate(w0, u0, C.FWD)
-  local hl = math.sqrt(f0.x * f0.x + f0.z * f0.z)
-  if hl < 0.5 then R.reason = "plane is not level (nose points up/down)" return end
-  local head0 = { x = f0.x / hl, y = 0, z = f0.z / hl }
+  local vertical = math.deg(math.asin(clamp(f0.y, -1, 1))) > C.VT_PITCH
+  local hv = vertical and mul(rotate(w0, u0, { x = 0, y = 1, z = 0 }), -1) or f0
+  local hl = math.sqrt(hv.x * hv.x + hv.z * hv.z)
+  if hl < 0.5 then R.reason = "plane must be level (runway) or standing nose-up (vertical)" return end
+  local head0 = { x = hv.x / hl, y = 0, z = hv.z / hl }
   local y0 = p0.y
   local okm, mass = pcall(sublevel.getMass)
   note(string.format("START %s at %.1f %.1f %.1f heading %.0f deg  MASS %s", why, p0.x, p0.y, p0.z, math.deg(atan2(head0.x, head0.z)), tostring(okm and mass or "?")))
@@ -242,9 +252,10 @@ local function main()
   flog.writeLine("t phase steps gx gy px py pz vx vy vz speed hgt pitch pitch_cmd bank heading head_cmd wx wy wz")
   local t0 = os.clock()
   local last = t0
-  local phase, pt = "ROLL", 0
+  local phase, pt = vertical and "VTAKE" or "ROLL", 0
+  note(vertical and "VERTICAL TAKEOFF (tail-sitter)" or "RUNWAY TAKEOFF")
   local steps, stepsI = 1, C.CLIMB_STEPS
-  local pitchCmd, trim = math.rad(C.ROLL_PITCH), math.rad(C.TRIM0)
+  local pitchCmd, trim = vertical and math.rad(90) or math.rad(C.ROLL_PITCH), math.rad(C.TRIM0)
   local head = head0
   local turned = 0
   local rollAcc = {}
@@ -286,7 +297,32 @@ local function main()
       return math.floor(clamp(stepsI + C.K_STEPS * (vt - sp), smin or 1, C.STEPS_MAX) + 0.5)
     end
     local want = pitchCmd
-    if phase == "ROLL" then
+    if phase == "VTAKE" then
+      steps = math.min(C.VT_STEPS, 1 + math.floor(pt / C.VT_STEP_T))
+      want = math.rad(90)
+      if not R.liftV and hgt > C.LIFTOFF_H then
+        R.liftV = sp
+        note(string.format("LIFTOFF (vertical) at %.1f s with %d steps", T, steps))
+      end
+      if hgt >= C.VT_H then
+        phase, pt = "PITCHOVER", 0
+        note(string.format("PITCHOVER at +%.0f, %.1f m/s up", hgt, vel.y))
+      elseif pt > 10 and not R.liftV then
+        R.reason = "no vertical liftoff in 10 s"
+        break
+      end
+    elseif phase == "PITCHOVER" then
+      steps = C.PO_STEPS
+      want = math.rad(C.CLIMB_PITCH)
+      if math.deg(pitch) <= C.PO_END_PITCH and hs >= C.PO_V then
+        trim = math.rad(C.TRIM0)
+        phase, pt = "LEVEL", 0
+        note(string.format("LEVEL FLIGHT after pitch-over: %.1f m/s, height %+.0f, %.1f s", sp, hgt, T))
+      elseif pt > 15 then
+        note(string.format("PITCHOVER slow: pitch %+.0f, %.1f m/s after 15 s", math.deg(pitch), hs))
+        phase, pt = "LEVEL", 0
+      end
+    elseif phase == "ROLL" then
       steps = math.min(C.ROLL_STEPS, 1 + math.floor(pt / C.ROLL_STEP_T))
       if prevV then
         local a = (hs - prevV) / dt
@@ -392,7 +428,7 @@ local function main()
       end
     end
     KD = (phase == "ROTATE" or (phase == "CLIMB" and pt < C.ROT_KD_T)) and C.KD_ROT or C.KD
-    local pr = math.rad(C.PITCH_RATE) * dt
+    local pr = math.rad(phase == "PITCHOVER" and C.PO_RATE or C.PITCH_RATE) * dt
     pitchCmd = clamp(clamp(want, -math.rad(C.PITCH_MAX), math.rad(C.PITCH_MAX)), pitchCmd - pr, pitchCmd + pr)
     if phase == "ROLLOUT" then
       cmdThr, cmdX, cmdY = 0, 0, 0
