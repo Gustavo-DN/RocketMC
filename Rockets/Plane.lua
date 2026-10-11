@@ -88,6 +88,8 @@ C.NAV = 3
 C.HOLD_TGO = 0.4
 C.SEP_DELAY = 0.5
 C.REL_SIDE = "top"
+C.FLARE_SIDE = "front"
+C.FLARE_PULSE = 1.0
 C.VT_PITCH = 60
 C.VT_STEPS = 8
 C.VT_STEP_T = 0.25
@@ -1090,9 +1092,18 @@ local function flight(tgt, pred, why)
         cutEngine()
         fl.thr, fl.gx, fl.gy = 0, 0, 0
         track(tr, contactPoint(pos, nose), tgt)
+        local flareOff
+        if g.phase == "TOUCHDOWN" and C.FLARE_SIDE then
+          pcall(redstone.setOutput, C.FLARE_SIDE, true)
+          flareOff = os.clock() + C.FLARE_PULSE
+        end
         local cutSpeed, cutTime = len(vel), now - t0
         local stop, still = os.clock() + 4, 0
         while os.clock() < stop and not tr.hit do
+          if flareOff and os.clock() >= flareOff then
+            pcall(redstone.setOutput, C.FLARE_SIDE, false)
+            flareOff = nil
+          end
           local ok, p2, w2, u2, v2 = pcall(tick)
           if not ok then break end
           track(tr, p2, tgt)
@@ -1100,6 +1111,10 @@ local function flight(tgt, pred, why)
           fl.trail[#fl.trail + 1] = p2
           still = len(v2) < 0.5 and still + 1 or 0
           if still > 10 then break end
+        end
+        if flareOff then
+          sleep(math.max(0, flareOff - os.clock()))
+          pcall(redstone.setOutput, C.FLARE_SIDE, false)
         end
         fl.result = missOf(tr, start, tgt)
         if fl.result then pcall(writeLog, tgt, fl.result, cutSpeed, cutTime) end
@@ -1177,6 +1192,7 @@ end
 
 local ok, err = pcall(parallel.waitForAny, main, telemetry, fuel)
 cutEngine()
+if C.FLARE_SIDE then pcall(redstone.setOutput, C.FLARE_SIDE, false) end
 term.setCursorBlink(false)
 term.setBackgroundColor(colors.black)
 term.setTextColor(colors.white)

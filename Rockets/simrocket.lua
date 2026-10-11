@@ -197,7 +197,7 @@ sublevel = {
   getInertiaTensor = function() return { { INER, 0, 0 }, { 0, 0.92, 0 }, { 0, 0, INER }, rows = 3, columns = 3 } end,
   getMass = function() return (S.attached and not os.getenv("NOMASS")) and 60 or MASS end,
 }
-redstone = { getSides = function() return { "top", "bottom", "left", "right", "front", "back" } end, getInput = function(side) return os.getenv("RS") ~= nil and side == "top" and T >= REL end }
+redstone = { setOutput = function(side, v) if os.getenv("DBG") then io.stderr:write(string.format("REDSTONE %s %s T=%.2f\n", side, tostring(v), T)) end end, getSides = function() return { "top", "bottom", "left", "right", "front", "back" } end, getInput = function(side) return os.getenv("RS") ~= nil and side == "top" and T >= REL end }
 fs = { open = function(p, m)
   local f = io.open("sim_" .. p, m == "a" and "a" or (m == "r" and "r" or "w"))
   if not f then return nil end
