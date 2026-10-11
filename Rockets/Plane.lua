@@ -60,8 +60,10 @@ local SHUTTLE_RAMP = 1.0
 local NAV = 3
 local HOLD_TGO = 0.4
 local SEP_DELAY = 0.5
+local REL_SIDE = "top"
+local REL_ON_MASS = false
 local REL_MASS = 0.7
-local REL_FREEFALL = true
+local REL_FREEFALL = false
 local REL_FALL_ACC = 6
 local REL_FALL_T = 0.4
 local REL_MIN_T = 1
@@ -790,9 +792,9 @@ local function drawRelease(tgt)
   text(math.floor((W - #a) / 2) + 1, 9, a, colors.white)
   local l = {
     "Starts when the shuttle is let go:",
-    "- the craft it rides on is left behind",
+    REL_ON_MASS and "- the craft it rides on is left behind" or "",
     REL_FREEFALL and "- it starts falling freely" or "",
-    "- a redstone signal on any side",
+    REL_SIDE and ("- a redstone signal on " .. REL_SIDE:upper()) or "- a redstone signal on any side",
     "- ENTER to start now",
   }
   for k, v in ipairs(l) do text(3, 11 + k, v, colors.lightGray) end
@@ -812,8 +814,8 @@ local function waitRelease(tgt)
       local dt = now - last
       last = now
       local why
-      if m0 and m and m < m0 * REL_MASS then why = "SEPARATED (MASS " .. fmt(m0) .. " -> " .. fmt(m) .. ")" end
-      for _, side in ipairs(redstone.getSides()) do
+      if REL_ON_MASS and m0 and m and m < m0 * REL_MASS then why = "SEPARATED (MASS " .. fmt(m0) .. " -> " .. fmt(m) .. ")" end
+      for _, side in ipairs(REL_SIDE and { REL_SIDE } or redstone.getSides()) do
         if not why and redstone.getInput(side) then why = "REDSTONE " .. side:upper() end
       end
       if dt > 0 then
