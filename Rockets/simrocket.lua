@@ -16,6 +16,7 @@ local LIFT = tonumber(os.getenv("LIFT") or 0)
 local KSIDE = tonumber(os.getenv("KSIDE") or 0.5)
 local LMAX = tonumber(os.getenv("LMAX") or 1e9)
 local KIND = tonumber(os.getenv("KIND") or 0)
+local FRIC = tonumber(os.getenv("FRIC") or 2)
 local FWD = PLANE and { x = 0, y = 0, z = 1 } or { x = 0, y = 1, z = 0 }
 local INER = tonumber(os.getenv("INERTIA") or (PLANE and 3.15 or 15.57))
 local TACC = tonumber(os.getenv("TACC") or 427 / MASS)
@@ -116,9 +117,25 @@ local function phys(dt)
   local floor = pool and TY - 6 or GROUND
   if S.pos.y < floor then
     S.pos.y = floor
-    if not S.splash and T > 1 then S.crash = S.crash or { x = S.pos.x, z = S.pos.z, t = T } end
-    S.vel = { x = 0, y = 0, z = 0 }
-    S.om = { x = 0, y = 0, z = 0 }
+    if PLANE and not pool then
+      if S.vel.y < -8 and T > 1 then S.crash = S.crash or { x = S.pos.x, z = S.pos.z, t = T, vy = S.vel.y } end
+      if S.vel.y < 0 then
+        S.touch = S.touch or { t = T, vy = S.vel.y, v = math.sqrt(S.vel.x ^ 2 + S.vel.z ^ 2) }
+        S.vel.y = 0
+      end
+      local hs = math.sqrt(S.vel.x ^ 2 + S.vel.z ^ 2)
+      if hs > 0 then
+        local k = math.max(0, hs - FRIC * dt) / hs
+        S.vel.x, S.vel.z = S.vel.x * k, S.vel.z * k
+      end
+      S.om.x, S.om.z = S.om.x * 0.5, S.om.z * 0.5
+      local nw = qrot(S.q, FWD)
+      if nw.y < 0 and math.abs(nw.y) > 0.05 then S.om.x = S.om.x + 2 * dt end
+    else
+      if not S.splash and T > 1 then S.crash = S.crash or { x = S.pos.x, z = S.pos.z, t = T } end
+      S.vel = { x = 0, y = 0, z = 0 }
+      S.om = { x = 0, y = 0, z = 0 }
+    end
   end
   local sp = math.sqrt(S.vel.x^2 + S.vel.y^2 + S.vel.z^2)
   S.maxV = math.max(S.maxV, sp)
@@ -183,6 +200,7 @@ local REMOTE = { mission = { mode = MODE, x = TX, y = TY, z = TZ, climb = tonumb
 local ok, err = pcall(loadfile(arg[1]), REMOTE)
 local sp = S.splash
 if os.getenv("DBG") and sp then real(string.format("SPLASH tip %.1f %.1f center %.1f %.1f", sp.px, sp.pz, sp.cx, sp.cz)) end
+if PLANE and S.touch then real(string.format("TOUCH t=%.1f vy=%.1f v=%.1f", S.touch.t, S.touch.vy, S.touch.v)) end
 real(string.format("%s %s ok=%s%s end_t=%.1f rel_t=%s splash_t=%s miss=%s splash_v=%s path_angle=%s crash=%s maxV=%.0f maxSpin=%.2f result_miss=%s",
   MODE, arg[1], tostring(ok), ok and "" or (" " .. tostring(err)), T, S.relT and string.format("%.1f", S.relT) or "-",
   sp and string.format("%.1f", sp.t) or "-", sp and string.format("%.1f", sp.miss) or "-", sp and string.format("%.0f", sp.v) or "-",
