@@ -11,6 +11,8 @@ local C = {
   COAST_T = 1.0,
   THR_1 = 0.07,
   THR_2 = 0.14,
+  THR_3 = 0.2,
+  FREE_WAIT = 120,
   BURN_T = 1.5,
   ID_THR = 0.07,
   ID_AMP = 0.4,
@@ -167,22 +169,34 @@ local function main()
   cut()
   local why = waitRelease()
   if not why then R.reason = "cancelled" return end
+  print("Waiting until it moves freely (not held)...")
+  local p0, _, _, v0 = tick(false)
+  local wt0, moved = os.clock(), false
+  while os.clock() - wt0 < C.FREE_WAIT do
+    local p1, _, _, v1 = tick(false)
+    if len(sub(p1, p0)) > 0.02 or len(sub(v1, v0)) > 0.05 then moved = true break end
+    p0, v0 = p1, v1
+  end
+  if not moved then R.reason = "never moved (still held?)" return end
   local okm, mass = pcall(sublevel.getMass)
-  note("START " .. why .. "  MASS " .. tostring(okm and mass or "?"))
+  note(string.format("START %s, free after %.1f s  MASS %s", why, os.clock() - wt0, tostring(okm and mass or "?")))
   flog = fs.open(C.LOG, "w")
   flog.writeLine("t phase thr gx gy px py pz vx vy vz bvx bvy bvz wx wy wz upx upy upz ms")
   local sched = {}
   local function plan(ph, t, thr, gx, gy) sched[#sched + 1] = { ph, t, thr, gx or 0, gy or 0 } end
   plan("COAST", C.COAST_T, 0)
-  plan("BURN1", C.BURN_T, C.THR_1)
-  plan("COAST2", C.COAST_T, 0)
-  plan("BURN2", C.BURN_T, C.THR_2)
   plan("IDGAP", C.ID_GAP, C.ID_THR)
   plan("IDX+", C.ID_T, C.ID_THR, C.ID_AMP, 0)
   plan("IDX-", C.ID_T, C.ID_THR, -C.ID_AMP, 0)
   plan("IDGAP", C.ID_GAP, C.ID_THR)
   plan("IDY+", C.ID_T, C.ID_THR, 0, C.ID_AMP)
   plan("IDY-", C.ID_T, C.ID_THR, 0, -C.ID_AMP)
+  plan("COAST1", C.COAST_T, 0)
+  plan("BURN1", C.BURN_T, C.THR_1)
+  plan("COAST2", C.COAST_T, 0)
+  plan("BURN2", C.BURN_T, C.THR_2)
+  plan("COAST3", C.COAST_T, 0)
+  plan("BURN3", C.BURN_T, C.THR_3)
   plan("HOLD", C.HOLD_T, C.ID_THR)
   plan("GLIDE", C.GLIDE_T, 0)
   local acc = {}
@@ -216,7 +230,7 @@ local function main()
     gs[2] = gs[2] + (cmd[3] - gs[2]) * a
     if prevV then
       local aw = mul(sub(vel, prevV), 1 / (now - prevT))
-      local ab = toBody(w, u, aw)
+      local ab = toBody(w, u, { x = aw.x, y = aw.y + C.GRAV, z = aw.z })
       local key = s[1]
       local A = acc[key] or { n = 0, x = 0, y = 0, z = 0, wx = 0, wy = 0, wz = 0, sp = 0 }
       A.n = A.n + 1
@@ -249,11 +263,11 @@ local function main()
     if not A or A.n == 0 then return nil end
     return { x = A.x / A.n, y = A.y / A.n, z = A.z / A.n }, { x = A.wx / A.n, y = A.wy / A.n, z = A.wz / A.n }, A.sp / A.n
   end
-  for _, k in ipairs({ "COAST", "BURN1", "COAST2", "BURN2", "HOLD", "GLIDE" }) do
+  for _, k in ipairs({ "COAST", "COAST1", "BURN1", "COAST2", "BURN2", "COAST3", "BURN3", "HOLD", "GLIDE" }) do
     local b, wv, sp = avg(k)
-    if b then note(string.format("%-6s body acc %s  world acc %s  speed %.1f", k, f3(b), f3(wv), sp)) end
+    if b then note(string.format("%-6s air+thrust force/mass in body %s  world acc %s  speed %.1f", k, f3(b), f3(wv), sp)) end
   end
-  local c1, c2, b1, b2 = avg("COAST"), avg("COAST2"), avg("BURN1"), avg("BURN2")
+  local c1, c2, b1, b2 = avg("COAST1"), avg("COAST2"), avg("BURN1"), avg("BURN2")
   if c1 and b1 then
     local d = sub(b1, c1)
     note(string.format("THRUST step 1 (%.2f): %s  => %.1f m/s2, forward axis in body = %s", C.THR_1, f3(d), len(d), f3(mul(d, 1 / math.max(len(d), 1e-6)))))
@@ -261,6 +275,11 @@ local function main()
   if c2 and b2 then
     local d = sub(b2, c2)
     note(string.format("THRUST step 2 (%.2f): %s  => %.1f m/s2", C.THR_2, f3(d), len(d)))
+  end
+  local c3, b3 = avg("COAST3"), avg("BURN3")
+  if c3 and b3 then
+    local d = sub(b3, c3)
+    note(string.format("THRUST step 3 (%.2f): %s  => %.1f m/s2", C.THR_3, f3(d), len(d)))
   end
   if #samples > 8 then
     local A, bx, by, bz = {}, { 0, 0, 0 }, { 0, 0, 0 }, { 0, 0, 0 }

@@ -1,0 +1,19 @@
+PLANE TEST Sat Oct 10 21:55:20 2026
+THRUSTER back
+INERTIA {{3.1544053963575811,-2.0414556908237396e-08,-2.9088789883779942e-08,},{-2.0414556908237396e-08,4.654405401473646,1.3760135629789483e-08,},{-2.9088789883779942e-08,1.3760135629789483e-08,2.2500000051167364,},columns=3,rows=3,}
+START MANUAL  MASS 4.5
+FIRST body velocity +2.364 +12.696 +26.333  world-up in body -0.000 +1.000 +0.000
+COAST  body acc +0.000 +0.000 +0.000  world acc +0.000 +0.000 +0.000  speed 29.3
+BURN1  body acc +0.000 +0.000 +0.000  world acc +0.000 +0.000 +0.000  speed 29.3
+COAST2 body acc +0.000 +0.000 +0.000  world acc +0.000 +0.000 +0.000  speed 29.3
+BURN2  body acc -0.334 -8.323 +2.375  world acc -2.717 -8.089 +0.725  speed 29.2
+HOLD   body acc +0.113 -5.654 +1.247  world acc +2.307 -5.118 -0.640  speed 31.8
+GLIDE  body acc -0.435 -1.315 -11.130  world acc +5.512 +9.623 -2.298  speed 11.6
+THRUST step 1 (0.07): +0.000 +0.000 +0.000  => 0.0 m/s2, forward axis in body = +0.000 +0.000 +0.000
+THRUST step 2 (0.14): -0.334 -8.323 +2.375  => 8.7 m/s2
+GIMBAL MAP at throttle 0.07 (rad/s2 per unit):
+  ang_x = -0.10*gx -3.47*gy +0.15
+  ang_y = -3.84*gx +0.06*gy +0.07
+  ang_z = +0.02*gx +0.00*gy -0.00
+MAX SPIN 1.79 rad/s
+END stopped at 14.6 s

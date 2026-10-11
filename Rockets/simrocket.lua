@@ -6,8 +6,16 @@ local SV = tonumber(os.getenv("SV") or 40)
 local SACC = tonumber(os.getenv("SACC") or 15)
 local REL = tonumber(os.getenv("REL") or 2)
 local FREE_CARRIER = os.getenv("COAST")
-local MASS = tonumber(os.getenv("MASS") or 5.5)
-local INER = tonumber(os.getenv("INERTIA") or 15.57)
+local PLANE = os.getenv("PLANE") ~= nil
+local MASS = tonumber(os.getenv("MASS") or (PLANE and 4.5 or 5.5))
+local MP = tonumber(os.getenv("MP") or -3.47)
+local MY = tonumber(os.getenv("MY") or -3.84)
+local KW = tonumber(os.getenv("KW") or 0.5)
+local DAMP = tonumber(os.getenv("DAMP") or 0.5)
+local LIFT = tonumber(os.getenv("LIFT") or 0)
+local KSIDE = tonumber(os.getenv("KSIDE") or 0.5)
+local FWD = PLANE and { x = 0, y = 0, z = 1 } or { x = 0, y = 1, z = 0 }
+local INER = tonumber(os.getenv("INERTIA") or (PLANE and 3.15 or 15.57))
 local TACC = tonumber(os.getenv("TACC") or 427 / MASS)
 local AX = tonumber(os.getenv("AX") or 3.37) * 15.57 / INER
 local AY = tonumber(os.getenv("AY") or 1.95) * 15.57 / INER
@@ -16,7 +24,7 @@ local DRAGK = tonumber(os.getenv("DRAG") or 0.1)
 local KAERO = tonumber(os.getenv("KAERO") or 0)
 local TQMAX = tonumber(os.getenv("TQMAX") or 1e9)
 local TMAX = tonumber(os.getenv("TMAX") or 300)
-local NOSE = 3
+local NOSE = tonumber(os.getenv("NOSE") or (PLANE and 1 or 3))
 T = 0
 local function qmul(a, b)
   return { w = a.w*b.w - a.x*b.x - a.y*b.y - a.z*b.z, x = a.w*b.x + a.x*b.w + a.y*b.z - a.z*b.y,
@@ -28,20 +36,23 @@ local function qrot(q, v)
 end
 local h0 = math.rad(tonumber(os.getenv("HEAD") or 20))
 local shuttle = MODE == "SHUTTLE"
-S = { pos = { x = 0, y = shuttle and SY or GROUND, z = 0 }, vel = { x = 0, y = shuttle and SV or 0, z = 0 }, om = { x = 0, y = 0, z = 0 },
+S = { pos = { x = 0, y = shuttle and SY or GROUND, z = 0 }, vel = PLANE and { x = SV * math.sin(h0), y = tonumber(os.getenv("SVY") or 0), z = SV * math.cos(h0) } or { x = 0, y = shuttle and SV or 0, z = 0 }, om = { x = 0, y = 0, z = 0 },
   q = { w = math.cos(h0 / 2), x = 0, y = math.sin(h0 / 2), z = 0 }, attached = shuttle, maxTilt = 0, maxSpin = 0, maxV = 0 }
 local Eng = { thr = 0, tx = 0, ty = 0, gx = 0, gy = 0 }
+local function mul3(v, s) return { x = v.x * s, y = v.y * s, z = v.z * s } end
 local function q15(x) return math.floor(x * 15 + 0.5) / 15 end
 local function phys(dt)
-  local nose = qrot(S.q, { x = 0, y = 1, z = 0 })
+  local nose = qrot(S.q, FWD)
   if S.attached then
     if T >= REL then
       S.attached = false
       S.relT = T
     else
-      local a = FREE_CARRIER and -10.5 or SACC
-      S.vel.y = S.vel.y + a * dt
-      S.pos.y = S.pos.y + S.vel.y * dt
+      if not PLANE then
+        local a = FREE_CARRIER and -10.5 or SACC
+        S.vel.y = S.vel.y + a * dt
+      end
+      S.pos.x, S.pos.y, S.pos.z = S.pos.x + S.vel.x * dt, S.pos.y + S.vel.y * dt, S.pos.z + S.vel.z * dt
       return
     end
   end
@@ -54,14 +65,28 @@ local function phys(dt)
   local tx, tz = KAERO * bv.z, -KAERO * bv.x
   local tm = math.sqrt(tx * tx + tz * tz)
   if tm > TQMAX then tx, tz = tx * TQMAX / tm, tz * TQMAX / tm end
-  local ax = -AY * Eng.gy * k + tx
-  local az = AX * Eng.gx * k - CPL * Eng.gy * k + tz
-  S.om.x, S.om.z = S.om.x + ax * dt, S.om.z + az * dt
-  S.om.x, S.om.y, S.om.z = S.om.x * (1 - 0.2 * dt), S.om.y, S.om.z * (1 - 0.2 * dt)
+  if PLANE then
+    local steps = tq * 15
+    local px, py = -KW * bv.y, KW * bv.x
+    local pm = math.sqrt(px * px + py * py)
+    if pm > TQMAX then px, py = px * TQMAX / pm, py * TQMAX / pm end
+    S.om.x = S.om.x + (MP * Eng.gy * steps + px - DAMP * S.om.x) * dt
+    S.om.y = S.om.y + (MY * Eng.gx * steps + py - DAMP * S.om.y) * dt
+    S.om.z = S.om.z * (1 - 2 * dt)
+  else
+    local ax = -AY * Eng.gy * k + tx
+    local az = AX * Eng.gx * k - CPL * Eng.gy * k + tz
+    S.om.x, S.om.z = S.om.x + ax * dt, S.om.z + az * dt
+    S.om.x, S.om.y, S.om.z = S.om.x * (1 - 0.2 * dt), S.om.y, S.om.z * (1 - 0.2 * dt)
+  end
   local d = qmul(S.q, { w = 1, x = 0.5 * S.om.x * dt, y = 0.5 * S.om.y * dt, z = 0.5 * S.om.z * dt })
   local n = math.sqrt(d.w^2 + d.x^2 + d.y^2 + d.z^2)
   S.q = { w = d.w / n, x = d.x / n, y = d.y / n, z = d.z / n }
-  local f = qrot(S.q, { x = 0, y = TACC * tq, z = 0 })
+  local f = qrot(S.q, mul3(FWD, TACC * tq))
+  if PLANE then
+    local l = qrot(S.q, { x = -KSIDE * bv.x, y = -(LIFT + KSIDE) * bv.y, z = 0 })
+    f = { x = f.x + l.x, y = f.y + l.y, z = f.z + l.z }
+  end
   local pool = math.abs(S.pos.x - TX) < 40 and math.abs(S.pos.z - TZ) < 40
   local inWater = pool and S.pos.y < TY
   local dk = inWater and 4 or DRAGK
@@ -71,7 +96,7 @@ local function phys(dt)
   local tip0 = { x = S.pos.x + nose.x * NOSE, y = S.pos.y + nose.y * NOSE, z = S.pos.z + nose.z * NOSE }
   local tipY0 = tip0.y
   S.pos.x, S.pos.y, S.pos.z = S.pos.x + S.vel.x * dt, S.pos.y + S.vel.y * dt, S.pos.z + S.vel.z * dt
-  nose = qrot(S.q, { x = 0, y = 1, z = 0 })
+  nose = qrot(S.q, FWD)
   local tip = { x = S.pos.x + nose.x * NOSE, y = S.pos.y + nose.y * NOSE, z = S.pos.z + nose.z * NOSE }
   if not S.splash and tipY0 > TY and tip.y <= TY and T > 1 then
     local f = (tip0.y - TY) / (tip0.y - tip.y)
@@ -118,7 +143,7 @@ APPLYQ = function()
   Q = keep
 end
 local engine = { setThrustNormalized = function(v) push("thr", v) end, setVector = function(x, y) push("tx", x) push("ty", y) end, pullFluid = function() end }
-peripheral = { wrap = function(s) if s == "bottom" then return engine end end,
+peripheral = { wrap = function(s) if s == "bottom" or s == "back" then return engine end end,
   getNames = function() return { "bottom" } end, hasType = function(n, t) return n == "bottom" and t == "liquid_vector_thruster" end,
   call = function() return { { amount = 1000 } } end }
 sublevel = {
