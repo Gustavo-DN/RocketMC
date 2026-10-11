@@ -21,7 +21,7 @@ C.THR_MARGIN = 0.03
 C.LIFTOFF_VY = 0.5
 C.ASCENT_TWR = 2
 C.ASCENT_STALL_H = 5
-C.TURN_RATE = 8
+C.TURN_RATE = 15
 C.KV = 1.0
 C.ERR_MAX = 0.6
 local FWD = { x = 0, y = 0, z = 1 }
@@ -104,6 +104,9 @@ C.PO_RATE = 25
 C.PO_STEPS = 6
 C.PO_END_PITCH = 20
 C.PO_V = 45
+C.VT_VY = 10
+C.PO_VY = 8
+C.PO_MIN_STEPS = 2
 C.CLIMB_PITCH = 12
 C.K_HV = 0.3
 C.VY_MAX = 8
@@ -114,7 +117,7 @@ C.TRIM_LO = -5
 C.TRIM_HI = 18
 C.PITCH_LIM = 25
 C.PITCH_RATE_C = 15
-C.TURN_RATE = 8
+C.TURN_RATE = 15
 C.V_FLY = 80
 C.V_APP = 40
 C.SLOW_D = 300
@@ -129,9 +132,11 @@ C.APP_STEPS = 1
 C.APP_LEAD = 150
 C.STEEP_SLOPE = 10
 C.APP_H2 = 40
+C.APP_ROUND = 80
 C.K_APP_STEPS = 0.3
 C.APP_STEPS_MAX = 6
 C.ALIGN_D = 150
+C.OUT_K = 0.7
 C.FLARE_H = 4
 C.FLARE_PITCH = 6
 C.TOUCH_H = 1
@@ -331,7 +336,7 @@ local function guideStep(g, pos, vel, nose, dt)
     g.stepsI = clamp(g.stepsI + 0.05 * (vt - sp) * dt, 1, C.STEPS_TOP)
     return math.floor(clamp(g.stepsI + C.K_STEPS * (vt - sp), 1, C.STEPS_TOP) + 0.5)
   end
-  if dh > 1 and (g.phase == "CRUISE" or (g.phase == "APPROACH" and dh > C.ALIGN_D)) then
+  if dh > 1 and not g.outbound and (g.phase == "CRUISE" or (g.phase == "APPROACH" and dh > C.ALIGN_D)) then
     g.head = turnToward(g.head, { x = hx / dh, y = 0, z = hz / dh }, math.rad(C.TURN_RATE) * dt)
   end
   local want, steps = g.pitchCmd, g.steps
@@ -346,7 +351,8 @@ local function guideStep(g, pos, vel, nose, dt)
     herr = math.deg(math.acos(clamp(c, -1, 1)))
   end
   if g.phase == "VTAKE" then
-    steps = math.min(C.VT_STEPS, 1 + math.floor(g.pt / C.VT_STEP_T))
+    g.vtS = math.min(C.VT_STEPS, (g.vtS or 1) + dt / C.VT_STEP_T * (vel.y < C.VT_VY and 1 or vel.y > C.VT_VY + 3 and -1 or 0))
+    steps = math.max(1, math.floor(g.vtS))
     want = math.rad(90)
     if (g.pt > C.VT_FAIL_T and math.deg(pitch) < C.VT_FAIL_PITCH) or (g.pt > C.VT_STUCK_T and pos.y - g.start.y < C.VT_STUCK_H) then
       g.phase, g.throttle, g.tmode = "CUT", 0, "TAKEOFF FAIL"
@@ -354,20 +360,22 @@ local function guideStep(g, pos, vel, nose, dt)
     end
     if pos.y - g.start.y >= C.VT_H then g.phase, g.pt = "PITCHOVER", 0 end
   elseif g.phase == "PITCHOVER" then
-    steps = C.PO_STEPS
+    g.vtS = clamp((g.vtS or C.PO_STEPS) + dt / C.VT_STEP_T * (vel.y > C.PO_VY and -1 or 1), C.PO_MIN_STEPS, C.PO_STEPS)
+    steps = math.floor(g.vtS)
     want = math.rad(C.CLIMB_PITCH)
     if (math.deg(pitch) <= C.PO_END_PITCH and hs >= C.PO_V) or g.pt > 15 then
       g.phase, g.pt, g.trim = "CRUISE", 0, math.rad(C.TRIM0)
     end
   elseif g.phase == "CRUISE" then
     local dApp = math.min(math.max(hgt, 0), C.APP_H2) / math.tan(math.rad(C.APP_SLOPE)) + math.max(hgt - C.APP_H2, 0) / math.tan(math.rad(C.STEEP_SLOPE))
+    if dh < C.OUT_K * dApp then g.outbound = true elseif dh > dApp + C.APP_LEAD then g.outbound = false end
     local near = dh <= dApp + C.APP_LEAD + C.SLOW_D
     steps = speedSteps(near and C.V_APP or C.V_FLY)
     local hRef = math.max(tgt.y + C.APP_H2, math.min(g.hCmd, slopeH(dh)))
     want = altHold(hRef)
-    if dh <= dApp + C.APP_LEAD and herr < C.ALIGN_ERR and pos.y - slopeH(dh) < C.APP_HIGH then g.phase, g.pt = "APPROACH", 0 end
+    if not g.outbound and dh <= dApp + C.APP_LEAD and herr < C.ALIGN_ERR and pos.y - slopeH(dh) < C.APP_HIGH then g.phase, g.pt = "APPROACH", 0 end
   elseif g.phase == "APPROACH" then
-    local slope = dh > d2 and C.STEEP_SLOPE or C.APP_SLOPE
+    local slope = dh > d2 + C.APP_ROUND and C.STEEP_SLOPE or C.APP_SLOPE
     local href = math.min(slopeH(dh), g.hCmd)
     if dh > C.ALIGN_D and (herr > C.GA_ERR or pos.y - href > C.GA_HIGH) then
       g.phase, g.pt = "CRUISE", 0
@@ -1122,7 +1130,7 @@ local function flight(tgt, pred, why)
         local err = errNow
         local dhx, dhz = tgt.x - pos.x, tgt.z - pos.z
         flog.writeLine(string.format("%.2f %s %.2f %.1f %.1f %.1f %.1f %.1f %+.2f %+.2f %.2f %+.2f %+.2f %+.2f %d %+.1f %+.1f %+.1f",
-          now - t0, g.phase, g.throttle, len(vel), pos.y, len(sub(tgt, pos)), math.sqrt(dhx * dhx + dhz * dhz), err, fl.gx, fl.gy, len(om), om.x, om.y, om.z,
+          now - t0, (g.outbound and g.phase == "CRUISE") and "OUTBOUND" or g.phase, g.throttle, len(vel), pos.y, len(sub(tgt, pos)), math.sqrt(dhx * dhx + dhz * dhz), err, fl.gx, fl.gy, len(om), om.x, om.y, om.z,
           g.steps or 0, math.deg(math.asin(clamp(nose.y, -1, 1))), math.deg(g.pitchCmd or 0), vel.y))
         flog.flush()
         nextLog = now + 0.1
