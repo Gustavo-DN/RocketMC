@@ -14,6 +14,8 @@ local KW = tonumber(os.getenv("KW") or 0.5)
 local DAMP = tonumber(os.getenv("DAMP") or 0.5)
 local LIFT = tonumber(os.getenv("LIFT") or 0)
 local KSIDE = tonumber(os.getenv("KSIDE") or 0.5)
+local LMAX = tonumber(os.getenv("LMAX") or 1e9)
+local KIND = tonumber(os.getenv("KIND") or 0)
 local FWD = PLANE and { x = 0, y = 0, z = 1 } or { x = 0, y = 1, z = 0 }
 local INER = tonumber(os.getenv("INERTIA") or (PLANE and 3.15 or 15.57))
 local TACC = tonumber(os.getenv("TACC") or 427 / MASS)
@@ -84,7 +86,14 @@ local function phys(dt)
   S.q = { w = d.w / n, x = d.x / n, y = d.y / n, z = d.z / n }
   local f = qrot(S.q, mul3(FWD, TACC * tq))
   if PLANE then
-    local l = qrot(S.q, { x = -KSIDE * bv.x, y = -(LIFT + KSIDE) * bv.y, z = 0 })
+    local ly = -(LIFT + KSIDE) * bv.y
+    if ly > LMAX then ly = LMAX elseif ly < -LMAX then ly = -LMAX end
+    local l = qrot(S.q, { x = -KSIDE * bv.x, y = ly, z = 0 })
+    local sp = math.sqrt(S.vel.x ^ 2 + S.vel.y ^ 2 + S.vel.z ^ 2)
+    if KIND > 0 and sp > 1 then
+      local di = KIND * ly * ly / math.max(sp, 10) / sp
+      l = { x = l.x - di * S.vel.x, y = l.y - di * S.vel.y, z = l.z - di * S.vel.z }
+    end
     f = { x = f.x + l.x, y = f.y + l.y, z = f.z + l.z }
   end
   local pool = math.abs(S.pos.x - TX) < 40 and math.abs(S.pos.z - TZ) < 40
@@ -154,7 +163,7 @@ sublevel = {
   getInertiaTensor = function() return { { INER, 0, 0 }, { 0, 0.92, 0 }, { 0, 0, INER }, rows = 3, columns = 3 } end,
   getMass = function() return (S.attached and not os.getenv("NOMASS")) and 60 or MASS end,
 }
-redstone = { getSides = function() return { "top", "bottom", "left", "right", "front", "back" } end, getInput = function() return false end }
+redstone = { getSides = function() return { "top", "bottom", "left", "right", "front", "back" } end, getInput = function(side) return os.getenv("RS") ~= nil and side == "top" and T >= REL end }
 fs = { open = function(p, m)
   local f = io.open("sim_" .. p, m == "a" and "a" or (m == "r" and "r" or "w"))
   if not f then return nil end
