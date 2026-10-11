@@ -17,6 +17,8 @@ local START_THRUST = 0.15
 local THR_RAMP = 0.05
 local THR_MARGIN = 0.03
 local LIFTOFF_VY = 0.5
+local ASCENT_TWR = 2
+local ASCENT_STALL_H = 5
 local TURN_RATE = 8
 local KV = 1.0
 local ERR_MAX = 1.2
@@ -38,7 +40,12 @@ local CUT_STILL_V = 1
 local CUT_STILL_T = 3
 local GRAV = 10.5
 local DRAG = 0.13
+local THRUST_FORCE = 427
 local THRUST_ACC = 77.6
+local REF_I = 15.57
+local GAIN_MIN = 0.25
+local GAIN_MAX = 4
+local inertiaK = 1
 local FAST_THR = 1.0
 local SLOW_DIST = 300
 local WATER_RAMP = 0.3
@@ -162,7 +169,7 @@ local function steer(dirW, w, u, om, dt, thr)
     attI.x = clamp(attI.x + e.x * dt, -ATT_IMAX, ATT_IMAX)
     attI.z = clamp(attI.z + e.z * dt, -ATT_IMAX, ATT_IMAX)
   end
-  local k = (thr and thr > ATT_REF_THR) and ATT_REF_THR / thr or 1
+  local k = ((thr and thr > ATT_REF_THR) and ATT_REF_THR / thr or 1) * inertiaK
   local gx = clamp(k * (KP * e.z + ATT_KI * attI.z - KD * (om.z - wb.z)), -VMAX, VMAX) * SIGN_X
   local gy = clamp(-k * (KP * e.x + ATT_KI * attI.x - KD * (om.x - wb.x)), -VMAX, VMAX) * SIGN_Y
   if SWAP then gx, gy = gy, gx end
@@ -205,7 +212,7 @@ local function guideStep(g, pos, vel, nose, dt)
   local tgt = g.tgt
   if g.phase == "IGNITION" then
     if vel.y > LIFTOFF_VY then
-      g.throttle = math.min(g.throttle + THR_MARGIN, MAX_THRUST)
+      g.throttle = math.min(math.max(g.throttle + THR_MARGIN, ASCENT_TWR * GRAV / THRUST_ACC), math.max(MAX_THRUST, ASCENT_TWR * GRAV / THRUST_ACC))
       g.phase, g.tmode = "ASCENT", "HOLD"
     else
       g.throttle = math.min(g.throttle + THR_RAMP * dt, MAX_THRUST)
@@ -228,7 +235,7 @@ local function guideStep(g, pos, vel, nose, dt)
     return nil, true
   end
   local los = sub(tgt, pos)
-  if g.phase == "ASCENT" and pos.y >= g.climbY then g.phase = "CRUISE" end
+  if g.phase == "ASCENT" and (pos.y >= g.climbY or (pos.y > g.start.y + ASCENT_STALL_H and vel.y < LIFTOFF_VY)) then g.phase = "CRUISE" end
   if g.phase == "ASCENT" then
     local f = clamp((pos.y - g.start.y) / g.climb, 0, 1)
     f = f * f
@@ -875,7 +882,21 @@ local function writeLog(tgt, r, speed, t)
   f.close()
 end
 
+local function tune()
+  local ok, m = pcall(sublevel.getMass)
+  if ok and type(m) == "number" and m > 0 then THRUST_ACC = THRUST_FORCE / m end
+  local ok2, it = pcall(sublevel.getInertiaTensor)
+  if ok2 and type(it) == "table" then
+    local a, c = it[1], it[3]
+    local ia = type(a) == "table" and (a[1] or a.x)
+    local ic = type(c) == "table" and (c[3] or c.z)
+    if type(ia) == "number" and type(ic) == "number" then inertiaK = clamp(math.max(ia, ic) / REF_I, GAIN_MIN, GAIN_MAX) end
+  end
+  return ok and m or nil
+end
+
 local function flight(tgt, pred, why)
+  local mass = tune()
   local start, _, _, v0 = tick()
   if mode == "SHUTTLE" then pred = predict(start, tgt, mode, climb, v0) end
   local g = newGuide(start, tgt, mode, climb)
@@ -887,7 +908,7 @@ local function flight(tgt, pred, why)
     local flog = fs.open(FLIGHT_LOG, "w")
     if flog then
       flog.writeLine(string.format("%s TGT %d %d %d CLIMB %d%s", mode, math.floor(tgt.x), math.floor(tgt.y), math.floor(tgt.z), climb, why and (" START " .. why) or ""))
-      flog.writeLine(string.format("FROM %.1f %.1f %.1f VEL %.1f %.1f %.1f", start.x, start.y, start.z, v0.x, v0.y, v0.z))
+      flog.writeLine(string.format("FROM %.1f %.1f %.1f VEL %.1f %.1f %.1f MASS %s TACC %.1f GAIN %.2f", start.x, start.y, start.z, v0.x, v0.y, v0.z, tostring(mass), THRUST_ACC, inertiaK))
       flog.writeLine("t phase thr speed alt dist dh err_deg gx gy spin")
     end
     local cT, cX, cY = g.throttle, 0, 0

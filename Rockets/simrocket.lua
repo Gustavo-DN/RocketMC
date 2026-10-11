@@ -6,11 +6,12 @@ local SV = tonumber(os.getenv("SV") or 40)
 local SACC = tonumber(os.getenv("SACC") or 15)
 local REL = tonumber(os.getenv("REL") or 2)
 local FREE_CARRIER = os.getenv("COAST")
-local MASS = 5.5
-local TACC = tonumber(os.getenv("TACC") or 77.6)
-local AX = tonumber(os.getenv("AX") or 3.37)
-local AY = tonumber(os.getenv("AY") or 1.95)
-local CPL = tonumber(os.getenv("CPL") or 0.94)
+local MASS = tonumber(os.getenv("MASS") or 5.5)
+local INER = tonumber(os.getenv("INERTIA") or 15.57)
+local TACC = tonumber(os.getenv("TACC") or 427 / MASS)
+local AX = tonumber(os.getenv("AX") or 3.37) * 15.57 / INER
+local AY = tonumber(os.getenv("AY") or 1.95) * 15.57 / INER
+local CPL = tonumber(os.getenv("CPL") or 0.94) * 15.57 / INER
 local DRAGK = tonumber(os.getenv("DRAG") or 0.1)
 local KAERO = tonumber(os.getenv("KAERO") or 0)
 local TQMAX = tonumber(os.getenv("TQMAX") or 1e9)
@@ -124,6 +125,7 @@ sublevel = {
   getLogicalPose = function() return { position = { x = S.pos.x, y = S.pos.y, z = S.pos.z }, orientation = { w = S.q.w, x = S.q.x, y = S.q.y, z = S.q.z } } end,
   getLinearVelocity = function() return { x = S.vel.x, y = S.vel.y, z = S.vel.z } end,
   getAngularVelocity = function() return { x = S.om.x, y = S.om.y, z = S.om.z } end,
+  getInertiaTensor = function() return { { INER, 0, 0 }, { 0, 0.92, 0 }, { 0, 0, INER }, rows = 3, columns = 3 } end,
   getMass = function() return (S.attached and not os.getenv("NOMASS")) and 60 or MASS end,
 }
 redstone = { getSides = function() return { "top", "bottom", "left", "right", "front", "back" } end, getInput = function() return false end }
