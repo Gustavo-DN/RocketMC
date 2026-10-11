@@ -119,6 +119,7 @@ APPLYQ = function()
 end
 local engine = { setThrustNormalized = function(v) push("thr", v) end, setVector = function(x, y) push("tx", x) push("ty", y) end, pullFluid = function() end }
 peripheral = { wrap = function(s) if s == "bottom" then return engine end end,
+  getNames = function() return { "bottom" } end, hasType = function(n, t) return n == "bottom" and t == "liquid_vector_thruster" end,
   call = function() return { { amount = 1000 } } end }
 sublevel = {
   isInPlotGrid = function() return true end,
