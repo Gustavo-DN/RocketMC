@@ -1,73 +1,77 @@
 local REMOTE = ...
 if type(REMOTE) ~= "table" then REMOTE = nil end
-local SIDE_ENGINE = "bottom"
-local SIDE_TANK = "top"
-local CLIMB = 50
-local DELAY = 5
-local VMAX = 1.0
-local KP = 1.0
-local KD = 0.6
-local ATT_KI = 1.0
-local ATT_IWIN = 20
-local ATT_IMAX = 1.0
-local ATT_REF_THR = 0.5
-local MAX_THRUST = 0.40
-local CRUISE_THR = 0.70
-local START_THRUST = 0.15
-local THR_RAMP = 0.05
-local THR_MARGIN = 0.03
-local LIFTOFF_VY = 0.5
-local ASCENT_TWR = 2
-local ASCENT_STALL_H = 5
-local TURN_RATE = 8
-local KV = 1.0
-local ERR_MAX = 1.2
-local FF_TAU = 0.2
-local FF_MAX = 1.5
-local FF_JUMP = 0.94
-local SIGN_X = 1
-local SIGN_Y = 1
-local SWAP = false
-local HIT_RADIUS = 3
-local CUT_TIME = 0.1
-local STUCK_V = 2
-local STUCK_T = 1
-local NOSE_OFFSET = 3
-local CUT_ERR = 100
-local CUT_ERR_T = 2
-local CUT_LOW = 15
-local CUT_STILL_V = 1
-local CUT_STILL_T = 3
-local GRAV = 10.5
-local DRAG = 0.13
-local THRUST_FORCE = 427
-local THRUST_ACC = 77.6
-local REF_I = 15.57
-local GAIN_MIN = 0.25
-local GAIN_MAX = 4
+local C = {
+  SIDE_ENGINE = "bottom",
+  SIDE_TANK = "top",
+  CLIMB = 50,
+  DELAY = 5,
+  VMAX = 1.0,
+  KP = 5,
+  KD = 3,
+  RATE_LEAD = 0.2,
+  RATE_TAU = 0.15,
+  RATE_ACC_MAX = 12,
+  ATT_KI = 3,
+  ATT_IWIN = 20,
+  ATT_IMAX = 1.0,
+  MAP_X = 3.37,
+  MAP_Y = -1.95,
+  MAP_CROSS = -0.94,
+  MAP_THR = 2 / 15,
+  MAX_THRUST = 0.40,
+  CRUISE_THR = 0.70,
+  START_THRUST = 0.15,
+  THR_RAMP = 0.05,
+  THR_MARGIN = 0.03,
+  LIFTOFF_VY = 0.5,
+  ASCENT_TWR = 2,
+  ASCENT_STALL_H = 5,
+  TURN_RATE = 8,
+  ERR_MAX = 1.2,
+  FF_TAU = 0.2,
+  FF_MAX = 1.5,
+  FF_JUMP = 0.94,
+  HIT_RADIUS = 3,
+  CUT_TIME = 0.1,
+  STUCK_V = 2,
+  STUCK_T = 1,
+  NOSE_OFFSET = 3,
+  CUT_ERR = 100,
+  CUT_ERR_T = 2,
+  CUT_LOW = 15,
+  CUT_STILL_V = 1,
+  CUT_STILL_T = 3,
+  GRAV = 10.5,
+  DRAG = 0.13,
+  THRUST_FORCE = 427,
+  THRUST_ACC = 77.6,
+  REF_I = 15.57,
+  GAIN_MIN = 0.25,
+  GAIN_MAX = 4,
+  FAST_THR = 1.0,
+  SLOW_DIST = 300,
+  WATER_RAMP = 0.3,
+  SHUTTLE_RAMP = 1.0,
+  NAV = 3,
+  HOLD_TGO = 0.4,
+  SEP_DELAY = 0.5,
+  REL_MASS = 0.7,
+  REL_FREEFALL = true,
+  REL_FALL_ACC = 6,
+  REL_FALL_T = 0.4,
+  REL_MIN_T = 1,
+  SIM_TIME = 240,
+  SAVE = "rocket.target",
+  LOG = "rocket.log",
+  FLIGHT_LOG = "flight.log",
+  MODES = { "WATER", "SHUTTLE" },
+}
 local inertiaK = 1
-local FAST_THR = 1.0
-local SLOW_DIST = 300
-local WATER_RAMP = 0.3
-local SHUTTLE_RAMP = 1.0
-local NAV = 3
-local HOLD_TGO = 0.4
-local SEP_DELAY = 0.5
-local REL_MASS = 0.7
-local REL_FREEFALL = true
-local REL_FALL_ACC = 6
-local REL_FALL_T = 0.4
-local REL_MIN_T = 1
-local SIM_TIME = 240
-local SAVE = "rocket.target"
-local LOG = "rocket.log"
-local FLIGHT_LOG = "flight.log"
-local MODES = { "WATER", "SHUTTLE" }
-local climb = CLIMB
+local climb = C.CLIMB
 local mode = "WATER"
 
-local engine = peripheral.wrap(SIDE_ENGINE)
-if not engine then error("no vector engine on " .. SIDE_ENGINE, 0) end
+local engine = peripheral.wrap(C.SIDE_ENGINE)
+if not engine then error("no vector engine on " .. C.SIDE_ENGINE, 0) end
 
 local W, H = term.getSize()
 local atan2 = math.atan2 or math.atan
@@ -102,7 +106,7 @@ end
 local function toBody(w, u, v) return rotate(w, mul(u, -1), v) end
 
 local function tick(thr, gx, gy, withMass)
-  local p, v, o, m
+  local p, v, o, m, actualX, actualY
   local fns = {
     function() p = sublevel.getLogicalPose() end,
     function() v = sublevel.getLinearVelocity() end,
@@ -111,11 +115,13 @@ local function tick(thr, gx, gy, withMass)
   if thr then
     fns[#fns + 1] = function() engine.setThrustNormalized(thr) end
     fns[#fns + 1] = function() engine.setVector(gx, gy) end
+    if engine.getVectorX then fns[#fns + 1] = function() local ok, x = pcall(engine.getVectorX) if ok then actualX = x end end end
+    if engine.getVectorY then fns[#fns + 1] = function() local ok, y = pcall(engine.getVectorY) if ok then actualY = y end end end
   end
   if withMass then fns[#fns + 1] = function() m = sublevel.getMass() end end
   parallel.waitForAll(table.unpack(fns))
   local w, u = quat(p.orientation)
-  return v3(p.position), w, u, v3(v), v3(o), m
+  return v3(p.position), w, u, v3(v), v3(o), m, actualX, actualY
 end
 
 local function cutEngine()
@@ -137,22 +143,19 @@ local function turnToward(a, b, maxStep)
   return unit(add(mul(a, math.sin((1 - t) * ang) / sn), mul(b, math.sin(t * ang) / sn)))
 end
 
-local function aim(dir, vel)
-  local sp = len(vel)
-  if sp < 3 then return dir end
-  return unit(add(dir, mul(sub(dir, mul(vel, 1 / sp)), KV)))
-end
-
 local attI = { x = 0, z = 0 }
 local ff = { w = { x = 0, y = 0, z = 0 } }
+local rates = { acc = { x = 0, y = 0, z = 0 } }
 
 local function steer(dirW, w, u, om, dt, thr)
   local du = unit(dirW)
-  if ff.prev and dt and dt > 0 and dot(ff.prev, du) > FF_JUMP then
-    local a = math.min(1, dt / FF_TAU)
+  if ff.prev and dt and dt > 0 and dot(ff.prev, du) > C.FF_JUMP then
+    local a = math.min(1, dt / C.FF_TAU)
     ff.w = add(ff.w, mul(sub(mul(cross(ff.prev, du), 1 / dt), ff.w), a))
     local m = len(ff.w)
-    if m > FF_MAX then ff.w = mul(ff.w, FF_MAX / m) end
+    if m > C.FF_MAX then ff.w = mul(ff.w, C.FF_MAX / m) end
+  else
+    ff.w = { x = 0, y = 0, z = 0 }
   end
   ff.prev = du
   local wb = toBody(w, u, ff.w)
@@ -161,18 +164,29 @@ local function steer(dirW, w, u, om, dt, thr)
   local s = len(axis)
   local e = { x = 0, y = 0, z = 0 }
   if s > 1e-9 then
-    e = mul(axis, math.min(atan2(s, d.y), ERR_MAX) / s)
+    e = mul(axis, math.min(atan2(s, d.y), C.ERR_MAX) / s)
   elseif d.y < 0 then
-    e = { x = ERR_MAX, y = 0, z = 0 }
+    e = { x = C.ERR_MAX, y = 0, z = 0 }
   end
-  if ATT_KI > 0 and dt and len(e) < math.rad(ATT_IWIN) then
-    attI.x = clamp(attI.x + e.x * dt, -ATT_IMAX, ATT_IMAX)
-    attI.z = clamp(attI.z + e.z * dt, -ATT_IMAX, ATT_IMAX)
+  if C.ATT_KI > 0 and dt and len(e) < math.rad(C.ATT_IWIN) then
+    attI.x = clamp(attI.x + e.x * dt, -C.ATT_IMAX, C.ATT_IMAX)
+    attI.z = clamp(attI.z + e.z * dt, -C.ATT_IMAX, C.ATT_IMAX)
   end
-  local k = ((thr and thr > ATT_REF_THR) and ATT_REF_THR / thr or 1) * inertiaK
-  local gx = clamp(k * (KP * e.z + ATT_KI * attI.z - KD * (om.z - wb.z)), -VMAX, VMAX) * SIGN_X
-  local gy = clamp(-k * (KP * e.x + ATT_KI * attI.x - KD * (om.x - wb.x)), -VMAX, VMAX) * SIGN_Y
-  if SWAP then gx, gy = gy, gx end
+  local tq = math.floor(clamp(thr or 0, 0, 1) * 15 + 1e-9) / 15
+  if tq <= 0 then return 0, 0 end
+  local scale = tq / C.MAP_THR / inertiaK
+  if rates.prev then
+    local a = math.min(1, dt / C.RATE_TAU)
+    rates.acc = add(rates.acc, mul(sub(mul(sub(om, rates.prev), 1 / dt), rates.acc), a))
+  end
+  rates.prev = om
+  local lead = { x = om.x + C.RATE_LEAD * clamp(rates.acc.x, -C.RATE_ACC_MAX, C.RATE_ACC_MAX), y = om.y, z = om.z + C.RATE_LEAD * clamp(rates.acc.z, -C.RATE_ACC_MAX, C.RATE_ACC_MAX) }
+  local ax = C.KP * e.x + C.ATT_KI * attI.x - C.KD * (lead.x - wb.x)
+  local az = C.KP * e.z + C.ATT_KI * attI.z - C.KD * (lead.z - wb.z)
+  local gy = ax / (C.MAP_Y * scale)
+  local gx = (az / scale - C.MAP_CROSS * gy) / C.MAP_X
+  local limit = math.max(1, math.abs(gx) / C.VMAX, math.abs(gy) / C.VMAX)
+  gx, gy = gx / limit, gy / limit
   return gx, gy
 end
 
@@ -180,28 +194,28 @@ local function newGuide(start, tgt, md, cl)
   return {
     start = start, tgt = tgt, mode = md, climb = cl, climbY = start.y + cl,
     phase = md == "SHUTTLE" and "SEPARATE" or "IGNITION", tmode = md == "SHUTTLE" and "COAST" or "RAMP",
-    throttle = md == "SHUTTLE" and 0 or START_THRUST, sepT = 0, stuck = 0,
+    throttle = md == "SHUTTLE" and 0 or C.START_THRUST, sepT = 0, stuck = 0,
     cmd = { x = 0, y = 1, z = 0 },
   }
 end
 
 local function contactPoint(pos, nose)
-  return add(pos, mul(nose, NOSE_OFFSET))
+  return add(pos, mul(nose, C.NOSE_OFFSET))
 end
 
 local function diveDir(g, pos, vel, nose)
-  local r = sub(g.tgt, add(pos, mul(nose, NOSE_OFFSET)))
+  local r = sub(g.tgt, add(pos, mul(nose, C.NOSE_OFFSET)))
   local dist = len(r)
   if dist < 1e-6 then return nose end
   local rh = mul(r, 1 / dist)
   local tgo = clamp(dist / math.max(dot(vel, rh), 1), 0.3, 20)
-  if g.held and tgo < HOLD_TGO then return g.held end
-  local acc = mul(vel, -DRAG)
-  acc.y = acc.y - GRAV
+  if g.held and tgo < C.HOLD_TGO then return g.held end
+  local acc = mul(vel, -C.DRAG)
+  acc.y = acc.y - C.GRAV
   local zem = sub(r, add(mul(vel, tgo), mul(acc, 0.5 * tgo * tgo)))
   local zp = sub(zem, mul(rh, dot(zem, rh)))
-  local T = math.max(g.throttle, 0.02) * THRUST_ACC
-  local aLat = mul(zp, NAV / (tgo * tgo))
+  local T = math.max(g.throttle, 0.02) * C.THRUST_ACC
+  local aLat = mul(zp, C.NAV / (tgo * tgo))
   local al = len(aLat)
   if al > 3 * T then aLat = mul(aLat, 3 * T / al) end
   g.held = unit(add(mul(rh, T), aLat))
@@ -211,41 +225,41 @@ end
 local function guideStep(g, pos, vel, nose, dt)
   local tgt = g.tgt
   if g.phase == "IGNITION" then
-    if vel.y > LIFTOFF_VY then
-      g.throttle = math.min(math.max(g.throttle + THR_MARGIN, ASCENT_TWR * GRAV / THRUST_ACC), math.max(MAX_THRUST, ASCENT_TWR * GRAV / THRUST_ACC))
+    if vel.y > C.LIFTOFF_VY then
+      g.throttle = math.min(math.max(g.throttle + C.THR_MARGIN, C.ASCENT_TWR * C.GRAV / C.THRUST_ACC), math.max(C.MAX_THRUST, C.ASCENT_TWR * C.GRAV / C.THRUST_ACC))
       g.phase, g.tmode = "ASCENT", "HOLD"
     else
-      g.throttle = math.min(g.throttle + THR_RAMP * dt, MAX_THRUST)
+      g.throttle = math.min(g.throttle + C.THR_RAMP * dt, C.MAX_THRUST)
       return nil
     end
   elseif g.phase == "SEPARATE" then
     g.sepT = g.sepT + dt
-    if g.sepT < SEP_DELAY then return nil end
-    g.phase, g.tmode, g.throttle = "CRUISE", "RAMP", START_THRUST
+    if g.sepT < C.SEP_DELAY then return nil end
+    g.phase, g.tmode, g.throttle = "CRUISE", "RAMP", C.START_THRUST
   end
-  local r = sub(tgt, add(pos, mul(nose, NOSE_OFFSET)))
+  local r = sub(tgt, add(pos, mul(nose, C.NOSE_OFFSET)))
   local dn = len(r)
   local vc = dn > 1e-6 and dot(vel, r) / dn or 0
   local closing = g.lastDn and dn < g.lastDn
   g.lastDn = dn
   local final = g.phase == "CRUISE"
-  if final and len(vel) < STUCK_V then g.stuck = g.stuck + dt else g.stuck = 0 end
-  if dn < HIT_RADIUS or g.stuck > STUCK_T or (final and ((vc > 1 and dn / vc < CUT_TIME) or (closing == false and dn < 20))) then
+  if final and pos.y < math.min(g.start.y, tgt.y) + C.CUT_LOW and len(vel) < C.STUCK_V then g.stuck = g.stuck + dt else g.stuck = 0 end
+  if dn < C.HIT_RADIUS or g.stuck > C.STUCK_T or (final and ((vc > 1 and dn / vc < C.CUT_TIME) or (closing == false and dn < 20))) then
     g.phase, g.throttle, g.tmode = "TOUCHDOWN", 0, "OFF"
     return nil, true
   end
   local los = sub(tgt, pos)
-  if g.phase == "ASCENT" and (pos.y >= g.climbY or (pos.y > g.start.y + ASCENT_STALL_H and vel.y < LIFTOFF_VY)) then g.phase = "CRUISE" end
+  if g.phase == "ASCENT" and (pos.y >= g.climbY or (pos.y > g.start.y + C.ASCENT_STALL_H and vel.y < C.LIFTOFF_VY)) then g.phase = "CRUISE" end
   if g.phase == "ASCENT" then
     local f = clamp((pos.y - g.start.y) / g.climb, 0, 1)
     f = f * f
     local want = unit(add(mul(UP, 1 - f), mul(unit(los), f)))
-    g.cmd = turnToward(g.cmd, want, math.rad(TURN_RATE) * dt)
-    return aim(g.cmd, vel)
+    g.cmd = turnToward(g.cmd, want, math.rad(C.TURN_RATE) * dt)
+    return g.cmd
   end
-  local want = len(los) > SLOW_DIST and FAST_THR or CRUISE_THR
+  local want = len(los) > C.SLOW_DIST and C.FAST_THR or C.CRUISE_THR
   if g.throttle < want then
-    g.throttle = math.min(g.throttle + (g.mode == "SHUTTLE" and SHUTTLE_RAMP or WATER_RAMP) * dt, want)
+    g.throttle = math.min(g.throttle + (g.mode == "SHUTTLE" and C.SHUTTLE_RAMP or C.WATER_RAMP) * dt, want)
   else
     g.throttle = want
   end
@@ -285,7 +299,7 @@ local function predict(start, tgt, md, cl, v0)
   local pts = { pos }
   local tr = newTracker()
   local done, tDone = false, nil
-  while t < SIM_TIME do
+  while t < C.SIM_TIME do
     local near = len(sub(tgt, pos)) < 150
     local dt = (g.phase ~= "CRUISE" or near) and 0.1 or 0.25
     local dir
@@ -301,8 +315,8 @@ local function predict(start, tgt, md, cl, v0)
       local rate = clamp(6 * thr + 0.02 * len(vel), 0.3, 3)
       nose = turnToward(nose, dd, math.min(rate * dt, ang * math.min(1, dt / 0.3)))
     end
-    local acc = add(mul(nose, thr * THRUST_ACC), mul(vel, -DRAG))
-    acc.y = acc.y - GRAV
+    local acc = add(mul(nose, thr * C.THRUST_ACC), mul(vel, -C.DRAG))
+    acc.y = acc.y - C.GRAV
     vel = add(vel, mul(acc, dt))
     pos = add(pos, mul(vel, dt))
     if g.phase == "IGNITION" and pos.y < start.y then
@@ -340,8 +354,8 @@ local function telemetry()
       local ok2, p = pcall(function() return sublevel.getLogicalPose() end)
       if ok2 and p then tel.pos = v3(p.position) end
     end
-    tel.eng = fluidAmount(SIDE_ENGINE)
-    tel.tank = fluidAmount(SIDE_TANK)
+    tel.eng = fluidAmount(C.SIDE_ENGINE)
+    tel.tank = fluidAmount(C.SIDE_TANK)
     os.queueEvent("telemetry")
     sleep(0.5)
   end
@@ -349,7 +363,7 @@ end
 
 local function fuel()
   while true do
-    pcall(engine.pullFluid, SIDE_TANK)
+    pcall(engine.pullFluid, C.SIDE_TANK)
     sleep(0.5)
   end
 end
@@ -514,13 +528,13 @@ local function plot(start, tgt, cur, pred, trail)
   end
 end
 
-local fields = { { label = "X", value = "" }, { label = "Y", value = "" }, { label = "Z", value = "" }, { label = "CLIMB", value = tostring(CLIMB) }, { label = "MODE", value = "WATER", choice = true } }
+local fields = { { label = "X", value = "" }, { label = "Y", value = "" }, { label = "Z", value = "" }, { label = "CLIMB", value = tostring(C.CLIMB) }, { label = "MODE", value = "WATER", choice = true } }
 local active = 1
 local msg = ""
 local FX, FW = 9, 14
 
-if fs.exists(SAVE) then
-  local f = fs.open(SAVE, "r")
+if fs.exists(C.SAVE) then
+  local f = fs.open(C.SAVE, "r")
   local d = textutils.unserialize(f.readAll())
   f.close()
   if type(d) == "table" and d.x and d.y and d.z then
@@ -528,7 +542,7 @@ if fs.exists(SAVE) then
   end
   if type(d) == "table" and d.climb then fields[4].value = tostring(d.climb) end
   if type(d) == "table" and d.mode then
-    for _, m in ipairs(MODES) do if m == d.mode then fields[5].value = m end end
+    for _, m in ipairs(C.MODES) do if m == d.mode then fields[5].value = m end end
     if d.mode == "SPLASH" then fields[5].value = "WATER" end
   end
 end
@@ -542,8 +556,8 @@ end
 
 local function cycleMode(dir)
   local i = 1
-  for k, m in ipairs(MODES) do if m == fields[5].value then i = k end end
-  fields[5].value = MODES[(i - 1 + dir) % #MODES + 1]
+  for k, m in ipairs(C.MODES) do if m == fields[5].value then i = k end end
+  fields[5].value = C.MODES[(i - 1 + dir) % #C.MODES + 1]
 end
 
 local function climbValue()
@@ -590,7 +604,7 @@ local function drawInput()
   text(2, 13, "Z " .. fmt(p and p.z), colors.white)
   text(2, 15, "ENGINE " .. fuelStr(tel.eng), colors.white)
   text(2, 16, "TANK   " .. fuelStr(tel.tank), colors.white)
-  climb = climbValue() or CLIMB
+  climb = climbValue() or C.CLIMB
   local tgt = target()
   local pl = currentPlan(p, tgt, fields[5].value, climb)
   plot(p, tgt, nil, pl, nil)
@@ -620,7 +634,7 @@ local function tryLaunch()
   if not tel.sub then msg = "NOT ON A SUB-LEVEL" return nil end
   climb = c
   mode = fields[5].value
-  local f = fs.open(SAVE, "w")
+  local f = fs.open(C.SAVE, "w")
   f.write(textutils.serialize({ x = t.x, y = t.y, z = t.z, climb = c, mode = mode }))
   f.close()
   msg = ""
@@ -670,7 +684,7 @@ local function inputScreen()
         if t then return t end
       elseif c == 18 and b >= 15 and b <= 23 then
         for i = 1, 3 do fields[i].value = "" end
-        fields[4].value = tostring(CLIMB)
+        fields[4].value = tostring(C.CLIMB)
         active, msg = 1, ""
       end
     end
@@ -706,7 +720,7 @@ local function drawCountdown(left, tgt)
   text(math.floor((W - #m) / 2) + 1, 4, m, colors.yellow)
   bigDigit(tostring(math.min(9, math.ceil(left))), math.floor((W - 6) / 2) + 1, 6, colors.red)
   local bw = W - 10
-  local done = math.floor(bw * clamp((DELAY - left) / DELAY, 0, 1) + 0.5)
+  local done = math.floor(bw * clamp((C.DELAY - left) / C.DELAY, 0, 1) + 0.5)
   fill(6, 12, bw, colors.gray)
   if done > 0 then fill(6, 12, done, colors.orange) end
   local t = "TGT " .. fmt(tgt.x) .. " " .. fmt(tgt.y) .. " " .. fmt(tgt.z)
@@ -725,7 +739,7 @@ local function countdown(tgt)
   local timer = os.startTimer(0.1)
   local ax = math.floor((W - 11) / 2) + 1
   while true do
-    local left = DELAY - (os.clock() - t0)
+    local left = C.DELAY - (os.clock() - t0)
     if left <= 0 then return true end
     drawCountdown(left, tgt)
     local e, a, b, c = os.pullEvent()
@@ -758,7 +772,7 @@ local function remoteWait(tgt)
     if REMOTE.state.aborted then return false end
     local left = REMOTE.launchIn()
     if left and left <= 0 then return true end
-    if left then drawCountdown(math.min(left, DELAY), tgt) else drawArmed(tgt) end
+    if left then drawCountdown(math.min(left, C.DELAY), tgt) else drawArmed(tgt) end
     local timer = os.startTimer(0.1)
     repeat
       local e, a, b, c = os.pullEvent()
@@ -786,7 +800,7 @@ local function drawRelease(tgt)
   local l = {
     "Starts when the shuttle is let go:",
     "- the craft it rides on is left behind",
-    REL_FREEFALL and "- it starts falling freely" or "",
+    C.REL_FREEFALL and "- it starts falling freely" or "",
     "- a redstone signal on any side",
     "- ENTER to start now",
   }
@@ -807,15 +821,15 @@ local function waitRelease(tgt)
       local dt = now - last
       last = now
       local why
-      if m0 and m and m < m0 * REL_MASS then why = "SEPARATED (MASS " .. fmt(m0) .. " -> " .. fmt(m) .. ")" end
+      if m0 and m and m < m0 * C.REL_MASS then why = "SEPARATED (MASS " .. fmt(m0) .. " -> " .. fmt(m) .. ")" end
       for _, side in ipairs(redstone.getSides()) do
         if not why and redstone.getInput(side) then why = "REDSTONE " .. side:upper() end
       end
       if dt > 0 then
-        if (vel.y - lastVy) / dt < -REL_FALL_ACC then fall = fall + dt else fall = 0 end
+        if (vel.y - lastVy) / dt < -C.REL_FALL_ACC then fall = fall + dt else fall = 0 end
         lastVy = vel.y
       end
-      if not why and REL_FREEFALL and now - t0 > REL_MIN_T and fall >= REL_FALL_T then why = "FREE FALL" end
+      if not why and C.REL_FREEFALL and now - t0 > C.REL_MIN_T and fall >= C.REL_FALL_T then why = "FREE FALL" end
       if why then
         result = why
         return
@@ -874,7 +888,7 @@ end
 
 local function writeLog(tgt, r, speed, t)
   local ok, d = pcall(os.date, "%Y-%m-%d %H:%M")
-  local f = fs.open(LOG, "a")
+  local f = fs.open(C.LOG, "a")
   if not f then return end
   f.writeLine(string.format("%s %s TGT %d %d %d MISS %.1f LONG %+.1f RIGHT %+.1f SPEED %.0f TIME %.1f%s",
     ok and d or "?", mode, math.floor(tgt.x), math.floor(tgt.y), math.floor(tgt.z),
@@ -884,18 +898,21 @@ end
 
 local function tune()
   local ok, m = pcall(sublevel.getMass)
-  if ok and type(m) == "number" and m > 0 then THRUST_ACC = THRUST_FORCE / m end
+  if ok and type(m) == "number" and m > 0 then C.THRUST_ACC = C.THRUST_FORCE / m end
   local ok2, it = pcall(sublevel.getInertiaTensor)
   if ok2 and type(it) == "table" then
     local a, c = it[1], it[3]
     local ia = type(a) == "table" and (a[1] or a.x)
     local ic = type(c) == "table" and (c[3] or c.z)
-    if type(ia) == "number" and type(ic) == "number" then inertiaK = clamp(math.max(ia, ic) / REF_I, GAIN_MIN, GAIN_MAX) end
+    if type(ia) == "number" and type(ic) == "number" then inertiaK = clamp(math.max(ia, ic) / C.REF_I, C.GAIN_MIN, C.GAIN_MAX) end
   end
   return ok and m or nil
 end
 
 local function flight(tgt, pred, why)
+  attI = { x = 0, z = 0 }
+  ff = { w = { x = 0, y = 0, z = 0 } }
+  rates = { acc = { x = 0, y = 0, z = 0 } }
   local mass = tune()
   local start, _, _, v0 = tick()
   if mode == "SHUTTLE" then pred = predict(start, tgt, mode, climb, v0) end
@@ -905,11 +922,11 @@ local function flight(tgt, pred, why)
   local function guide()
     local t0 = os.clock()
     local last, nextTrail, nextLog = t0, t0, t0
-    local flog = fs.open(FLIGHT_LOG, "w")
+    local flog = fs.open(C.FLIGHT_LOG, "w")
     if flog then
       flog.writeLine(string.format("%s TGT %d %d %d CLIMB %d%s", mode, math.floor(tgt.x), math.floor(tgt.y), math.floor(tgt.z), climb, why and (" START " .. why) or ""))
-      flog.writeLine(string.format("FROM %.1f %.1f %.1f VEL %.1f %.1f %.1f MASS %s TACC %.1f GAIN %.2f", start.x, start.y, start.z, v0.x, v0.y, v0.z, tostring(mass), THRUST_ACC, inertiaK))
-      flog.writeLine("t phase thr speed alt dist dh err_deg gx gy spin")
+      flog.writeLine(string.format("FROM %.1f %.1f %.1f VEL %.1f %.1f %.1f MASS %s TACC %.1f GAIN %.2f", start.x, start.y, start.z, v0.x, v0.y, v0.z, tostring(mass), C.THRUST_ACC, inertiaK))
+      flog.writeLine("t phase thr speed alt dist dh err_deg gx gy spin wx wy wz nx ny nz vx vy vz cmdx cmdy cmdz actual_gx actual_gy loop_ms")
     end
     local cT, cX, cY = g.throttle, 0, 0
     local badT, stillT = 0, 0
@@ -920,9 +937,10 @@ local function flight(tgt, pred, why)
         fl.thr, fl.gx, fl.gy, fl.phase = 0, 0, 0, "ABORT"
         return
       end
-      local pos, w, u, vel, om = tick(cT, cX, cY)
+      local pos, w, u, vel, om, _, actualX, actualY = tick(cT, cX, cY)
       local now = os.clock()
-      local dt = clamp(now - last, 0.01, 0.5)
+      local elapsed = now - last
+      local dt = clamp(elapsed, 0.01, 0.5)
       last = now
       local nose = rotate(w, u, UP)
       local dir, done = guideStep(g, pos, vel, nose, dt)
@@ -941,11 +959,11 @@ local function flight(tgt, pred, why)
         fl.gx, fl.gy = 0, 0
       end
       local errNow = dir and math.deg(math.acos(clamp(dot(nose, unit(dir)), -1, 1))) or 0
-      local low = pos.y < math.min(start.y, tgt.y) + CUT_LOW
-      if low and errNow > CUT_ERR then badT = badT + dt else badT = 0 end
-      if g.phase ~= "IGNITION" and g.phase ~= "SEPARATE" and len(vel) < CUT_STILL_V then stillT = stillT + dt else stillT = 0 end
-      if not done and (badT > CUT_ERR_T or stillT > CUT_STILL_T) then
-        g.phase, g.throttle, g.tmode = "CUT", 0, badT > CUT_ERR_T and "TILT" or "STILL"
+      local low = pos.y < math.min(start.y, tgt.y) + C.CUT_LOW
+      if low and errNow > C.CUT_ERR then badT = badT + dt else badT = 0 end
+      if low and g.phase ~= "IGNITION" and g.phase ~= "SEPARATE" and len(vel) < C.CUT_STILL_V then stillT = stillT + dt else stillT = 0 end
+      if not done and (badT > C.CUT_ERR_T or stillT > C.CUT_STILL_T) then
+        g.phase, g.throttle, g.tmode = "CUT", 0, badT > C.CUT_ERR_T and "TILT" or "STILL"
         fl.phase, fl.tmode = g.phase, g.tmode
         if flog then flog.writeLine(string.format("CUT %s %.2f", g.tmode, now - t0)) end
         done = true
@@ -953,8 +971,11 @@ local function flight(tgt, pred, why)
       if flog and now >= nextLog then
         local err = errNow
         local dhx, dhz = tgt.x - pos.x, tgt.z - pos.z
-        flog.writeLine(string.format("%.2f %s %.2f %.1f %.1f %.1f %.1f %.1f %+.2f %+.2f %.2f",
-          now - t0, g.phase, g.throttle, len(vel), pos.y, len(sub(tgt, pos)), math.sqrt(dhx * dhx + dhz * dhz), err, fl.gx, fl.gy, len(om)))
+        flog.writeLine(string.format("%.2f %s %.2f %.1f %.1f %.1f %.1f %.1f %+.2f %+.2f %.2f %+.3f %+.3f %+.3f %+.3f %+.3f %+.3f %+.2f %+.2f %+.2f %+.3f %+.3f %+.3f %s %s %.0f",
+          now - t0, g.phase, g.throttle, len(vel), pos.y, len(sub(tgt, pos)), math.sqrt(dhx * dhx + dhz * dhz), err, fl.gx, fl.gy, len(om), om.x, om.y, om.z, nose.x, nose.y, nose.z, vel.x, vel.y, vel.z,
+          dir and dir.x or 0, dir and dir.y or 0, dir and dir.z or 0,
+          type(actualX) == "number" and string.format("%+.3f", actualX) or "NA",
+          type(actualY) == "number" and string.format("%+.3f", actualY) or "NA", elapsed * 1000))
         flog.flush()
         nextLog = now + 0.25
       end
@@ -1016,7 +1037,7 @@ local function main()
   cutEngine()
   if REMOTE then
     local m = REMOTE.mission
-    mode, climb = m.mode == "SHUTTLE" and "SHUTTLE" or "WATER", m.climb or CLIMB
+    mode, climb = m.mode == "SHUTTLE" and "SHUTTLE" or "WATER", m.climb or C.CLIMB
     local rt = { x = m.x, y = m.y, z = m.z }
     local w0 = os.clock()
     while not tel.pos and os.clock() - w0 < 5 do sleep(0.1) end

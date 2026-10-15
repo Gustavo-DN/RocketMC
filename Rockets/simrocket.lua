@@ -132,6 +132,7 @@ local function phys(dt)
     S.splash = { px = hx, pz = hz, cx = S.pos.x, cz = S.pos.z, miss = math.sqrt((hx - TX)^2 + (hz - TZ)^2), v = math.sqrt(S.vel.x^2 + S.vel.y^2 + S.vel.z^2), t = T,
       ang = math.deg(math.asin(math.max(-1, math.min(1, -S.vel.y / math.max(1e-6, math.sqrt(S.vel.x^2 + S.vel.y^2 + S.vel.z^2)))))) }
   end
+  if S.pos.y > GROUND + 1 or shuttle then S.airborne = true end
   local floor = pool and TY - 6 or GROUND
   if S.pos.y < floor then
     S.pos.y = floor
@@ -151,7 +152,7 @@ local function phys(dt)
       local nw = qrot(S.q, FWD)
       if nw.y < 0 and math.abs(nw.y) > 0.05 then S.om.x = S.om.x + 2 * dt end
     else
-      if not S.splash and T > 1 then S.crash = S.crash or { x = S.pos.x, z = S.pos.z, t = T } end
+      if S.airborne and T > 1 and not pool then S.crash = S.crash or { x = S.pos.x, z = S.pos.z, t = T } end
       S.vel = { x = 0, y = 0, z = 0 }
       S.om = { x = 0, y = 0, z = 0 }
     end
@@ -187,7 +188,7 @@ APPLYQ = function()
   for _, q in ipairs(Q) do if q.t <= T + 1e-9 then Eng[q.k] = q.v else keep[#keep + 1] = q end end
   Q = keep
 end
-local engine = { setThrustNormalized = function(v) push("thr", v) end, setVector = function(x, y) push("tx", x) push("ty", y) end, pullFluid = function() end }
+local engine = { setThrustNormalized = function(v) push("thr", v) end, setVector = function(x, y) push("tx", x) push("ty", y) end, pullFluid = function() end, getVectorX = function() return Eng.gx end, getVectorY = function() return Eng.gy end }
 peripheral = { wrap = function(s) if s == "bottom" or s == "back" then return engine end end,
   getNames = function() return { "bottom" } end, hasType = function(n, t) return n == "bottom" and t == "liquid_vector_thruster" end,
   call = function() return { { amount = 1000 } } end }
@@ -223,9 +224,10 @@ term = setmetatable({ getSize = function() return 51, 19 end, write = function(s
 colors = setmetatable({}, { __index = function() return 1 end })
 keys = { backspace = 14, enter = 28, numPadEnter = 156 }
 table.unpack = table.unpack or unpack
+local runtimeError = false
 local real = print
 DBGW = function(s) io.stderr:write(s .. "\n") end
-print = function(s) io.stderr:write("PRINT: " .. tostring(s) .. "\n") end
+print = function(s) runtimeError = true io.stderr:write("PRINT: " .. tostring(s) .. "\n") end
 local REMOTE = { mission = { mode = MODE, x = TX, y = TY, z = TZ, climb = tonumber(os.getenv("CLIMB") or 50) }, state = {},
   report = function() return false end, plan = function() end, launchIn = function() return 0 end,
   result = function(r, sp, t) RESULT = { r = r, sp = sp, t = t } end }
@@ -237,3 +239,8 @@ real(string.format("%s %s ok=%s%s end_t=%.1f rel_t=%s splash_t=%s miss=%s splash
   sp and string.format("%.1f", sp.t) or "-", sp and string.format("%.1f", sp.miss) or "-", sp and string.format("%.0f", sp.v) or "-",
   sp and string.format("%.0f", sp.ang) or "-", S.crash and string.format("(%.0f,%.0f)@%.1f", S.crash.x, S.crash.z, S.crash.t) or "-",
   S.maxV, S.maxSpin, RESULT and string.format("%.1f L%+.1f R%+.1f", RESULT.r.total, RESULT.r.long, RESULT.r.right) or "-"))
+
+if os.getenv("CHECK_FLIGHT") then
+  local maxMiss = tonumber(os.getenv("MAX_MISS") or 20)
+  if not ok or runtimeError or not RESULT or not S.splash or S.crash or S.splash.miss > maxMiss then os.exit(1) end
+end
