@@ -181,3 +181,14 @@ KP 1.5, KD 1.6, ATT_KI 0.8, ATT_REF_THR 0.4, ROLL_KP 0.3, ROLL_KD 0.4, AERO_K 0.
 - Real 6.7 km NET flight with the capped version: 198 s, miss 1.0, AB cruise only 82 m/s at 46% real throttle. Calibrated sim: MASS=29.5 IPITCH=300 IROLL=39 KAERO=0.03 CAX=0.16 (matches 79 m/s, 205 s, peak 234).
 - Sim results with the port, light rocket: 6,760 blocks ≈ 113–126 s, 12,000 ≈ 146 s, misses 0.3–2.4 in normal variants; 4–14 with a steady side push or KLAT 0.8 (sink from ~280). Old rocket: all 19 regression flights land, 7,000 ≈ 106 s (was 111).
 - SPLASH on the light rocket is untuned (sim misses 15–67 blocks, flies low at ~58). Full thrust in CRUISE didn't fix it. Unchanged for the old rocket.
+
+## 13. ORBIT mode (high arc), for the heavy Rocket4
+- Menu: SPLASH, ARC, NET, ORBIT. The user's "big rocket" is the original 64-mass Rocket4.
+- Route: BOOST → ASCENT → DESCENT → (gate) AFTERBURNER locked at gate height → normal brake → TRANSFER → SINK.
+- `orbitPlan` (at the top of BOOST): apex `yA = max(start, tgt) + clamp(ORBIT_K·range, ORBIT_HMIN, ORBIT_HMAX)`; gate at `lg` before the target (tilt-brake distance from ORBIT_V plus handoff, AB_PAD and ORBIT_LEVEL, capped at ORBIT_GATE_F·range); gate height `yG = max(climbY, tgt.y + ORBIT_PULL_H)`.
+- `orbitDir`: progress s along the boost→target line. Altitude profile: sine rise to the apex over the first ORBIT_SA, then cos² fall to yG with zero slope at the gate. Velocity command (velCmd) with speed `ob.v`, slope feed-forward, altitude correction ORBIT_KY and cross-track correction ORBIT_KC. Vertical speed is ≥ 0 in ASCENT and ≤ 0 in DESCENT (capped at ORBIT_VYMAX / ORBIT_VYDOWN). Nose is never more than 5° below horizontal (ORBIT_TILT 95), so gravity does the descending.
+- `orbitGate`: hands off to AFTERBURNER with abLock at yG. Recovery during ORBIT also resumes through `orbitGate`.
+- The ceiling becomes `yA + ORBIT_CEIL` for ORBIT.
+- Trips shorter than ORBIT_MIN_DIST (1500), and rockets with full thrust ≥ FLIP_ACC (the light airframe: too much drag to come down the arc), fly the NET route instead (flip included).
+- Sim, old rocket: 1,600–12,000 blocks all land 0.1–2.5 off. 7,000 ≈ 118 s with apex ≈ 1,400; 12,000 ≈ 145 s; 3,000 ≈ 94 s with apex ≈ 515. At most 1 recovery (a tilt > 45° at the TRANSFER start, same as the NET route). Holds with KAERO 0.045, KLAT 1.0, TQMAX 1.8 and lag freezes. Other modes unchanged.
+- Earlier failures to avoid: a velocity command that allowed nose-down thrust (VYMAX 120 down) dove to 114° tilt; a steep arc (K 0.25, SA 0.4) on 3,000 blocks fell behind the path, then the DESCENT asked for a climb and triggered ATTITUDE recovery.

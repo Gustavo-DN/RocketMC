@@ -169,6 +169,21 @@ local C = {
   AUTH_V = 15,
   AUTH_THR = 0.45,
   CEILING = 700,
+  ORBIT_MIN_DIST = 1500,
+  ORBIT_K = 0.2,
+  ORBIT_HMIN = 300,
+  ORBIT_HMAX = 1500,
+  ORBIT_V = 150,
+  ORBIT_SA = 0.45,
+  ORBIT_KY = 0.15,
+  ORBIT_KC = 0.1,
+  ORBIT_VYMAX = 120,
+  ORBIT_VYDOWN = 70,
+  ORBIT_LEVEL = 300,
+  ORBIT_GATE_F = 0.35,
+  ORBIT_PULL_H = 150,
+  ORBIT_TILT = 95,
+  ORBIT_CEIL = 300,
   CEIL_THR = 0.1,
   SIM_TIME = 240,
   SIM_TURN = 3,
@@ -176,7 +191,7 @@ local C = {
   SAVE = "rocket.target",
   LOG = "rocket.log",
   FLIGHT_LOG = "flight.log",
-  MODES = { "SPLASH", "ARC", "NET" },
+  MODES = { "SPLASH", "ARC", "NET", "ORBIT" },
 }
 local climb = C.CLIMB
 local mode = "SPLASH"
@@ -398,10 +413,10 @@ local function tune()
   C.NET_MIN_THR = clamp(C.NET_MIN_ACC / ta, 0.05, 0.6)
 end
 
-local FAST = { AFTERBURNER = true, FLIP = true, RETRO = true }
+local FAST = { AFTERBURNER = true, FLIP = true, RETRO = true, ASCENT = true, DESCENT = true }
 
 local function flipOn(g)
-  return ((g.mode == "NET" and C.NET_FLIP) or (g.mode == "ARC" and C.ARC_FLIP)) and (E.accFull or 0) >= C.FLIP_ACC
+  return (((g.mode == "NET" or g.mode == "ORBIT") and C.NET_FLIP) or (g.mode == "ARC" and C.ARC_FLIP)) and (E.accFull or 0) >= C.FLIP_ACC
 end
 
 local function thrustMode(g)
@@ -520,6 +535,54 @@ local function levelDir(g, pos, vel, fx, fz, dt)
   return { x = hx * math.cos(th), y = math.sin(th), z = hz * math.cos(th) }
 end
 
+local function orbitPlan(g, pos)
+  local tgt = g.tgt
+  local hx, hz = tgt.x - pos.x, tgt.z - pos.z
+  local d = math.sqrt(hx * hx + hz * hz)
+  local vm = C.NET_VMAX * C.NET_VMAX
+  local pad = C.NET_VMAX * C.NET_VMAX / (2 * C.NET_ABRAKE) + C.AB_MARGIN + C.AB_PAD + C.ORBIT_LEVEL
+  local lg = math.min(math.max(C.ORBIT_V * C.ORBIT_V - vm, 0) / (2 * C.AB_BRAKE) + pad, C.ORBIT_GATE_F * d)
+  g.ob = {
+    x0 = pos.x, z0 = pos.z, ux = hx / d, uz = hz / d, X = d - lg, y0 = pos.y,
+    yA = math.max(g.start.y, tgt.y) + clamp(C.ORBIT_K * d, C.ORBIT_HMIN, C.ORBIT_HMAX),
+    yG = math.max(g.climbY, tgt.y + C.ORBIT_PULL_H),
+    v = math.min(C.ORBIT_V, math.sqrt(vm + 2 * C.AB_BRAKE * math.max(lg - pad, 0))),
+  }
+end
+
+local function orbitGate(g)
+  local T = math.max(g.throttle, 0.05) * C.THRUST_ACC
+  g.phase, g.tmode, g.abLock, g.abY, g.abB, g.abPitch, g.abVy, g.abAm = "AFTERBURNER", "AB", true, g.ob.yG, 0, nil, nil, nil
+  g.abA = math.deg(math.asin(clamp(C.GRAV / T, 0, 1))) + C.AB_AOA_START
+end
+
+local function orbitDir(g, pos, vel, nose, dt)
+  local o = g.ob
+  local rx, rz = pos.x - o.x0, pos.z - o.z0
+  local x = rx * o.ux + rz * o.uz
+  local s = clamp(x / o.X, 0, 1)
+  if s >= 1 then
+    orbitGate(g)
+    return nil
+  end
+  local y, slope
+  if s < C.ORBIT_SA then
+    local u = math.pi / 2 * s / C.ORBIT_SA
+    y = o.y0 + (o.yA - o.y0) * math.sin(u)
+    slope = (o.yA - o.y0) * math.cos(u) * math.pi / (2 * C.ORBIT_SA * o.X)
+  else
+    local u = math.pi / 2 * (s - C.ORBIT_SA) / (1 - C.ORBIT_SA)
+    y = o.yG + (o.yA - o.yG) * math.cos(u) ^ 2
+    slope = -(o.yA - o.yG) * math.sin(2 * u) * math.pi / (2 * (1 - C.ORBIT_SA) * o.X)
+  end
+  local up = s < C.ORBIT_SA
+  g.phase, g.tmode = up and "ASCENT" or "DESCENT", "ORBIT"
+  local vh = o.v / math.sqrt(1 + slope * slope)
+  local px, pz = rx - x * o.ux, rz - x * o.uz
+  local vy = clamp(vh * slope + C.ORBIT_KY * (y - pos.y), up and 0 or -C.ORBIT_VYDOWN, up and C.ORBIT_VYMAX or 0)
+  return velCmd(g, { x = o.ux * vh - C.ORBIT_KC * px, y = vy, z = o.uz * vh - C.ORBIT_KC * pz }, vel, nose, dt, C.ORBIT_TILT, C.AB_MAX_THR)
+end
+
 local function guideStep(g, pos, vel, nose, dt)
   local tgt = g.tgt
   g.noseY = nose.y
@@ -554,10 +617,17 @@ local function guideStep(g, pos, vel, nose, dt)
     else
       g.phase, g.tmode, g.bias = "TRANSFER", "AUTO", 0
       local bx, bz = tgt.x - pos.x, tgt.z - pos.z
-      if C.AFTERBURNER and math.sqrt(bx * bx + bz * bz) > (g.mode == "ARC" and C.ARC_AB_MIN or C.AB_MIN_DIST) then
+      if g.mode == "ORBIT" and (E.accFull or 0) < C.FLIP_ACC and math.sqrt(bx * bx + bz * bz) > C.ORBIT_MIN_DIST then
+        orbitPlan(g, pos)
+        g.phase, g.tmode = "ASCENT", "ORBIT"
+      elseif C.AFTERBURNER and math.sqrt(bx * bx + bz * bz) > (g.mode == "ARC" and C.ARC_AB_MIN or C.AB_MIN_DIST) then
         g.phase, g.tmode = "AFTERBURNER", "AB"
       end
     end
+  end
+  if g.phase == "ASCENT" or g.phase == "DESCENT" then
+    local d = orbitDir(g, pos, vel, nose, dt)
+    if d then return d end
   end
   if g.phase == "AFTERBURNER" then
     local hx, hz = tgt.x - pos.x, tgt.z - pos.z
@@ -1254,7 +1324,9 @@ local function recoverStep(g, pos, vel, nose, om, dt)
       g.rec = false
       if FAST[g.phase] then
         local hx, hz = g.tgt.x - pos.x, g.tgt.z - pos.z
-        if flipOn(g) and math.sqrt(hx * hx + hz * hz) > C.AB_MIN_DIST then
+        if g.ob and math.sqrt(hx * hx + hz * hz) > C.AB_MIN_DIST then
+          orbitGate(g)
+        elseif flipOn(g) and math.sqrt(hx * hx + hz * hz) > C.AB_MIN_DIST then
           g.phase, g.tmode, g.abLock, g.abB, g.abPitch = "AFTERBURNER", "AB", false, 0, nil
         else
           g.phase, g.tmode, g.bias = "TRANSFER", "AUTO", 0
@@ -1274,7 +1346,7 @@ end
 
 local function drawFlight(start, tgt)
   clear()
-  local colorsFor = { IGNITION = colors.yellow, BOOST = colors.orange, CRUISE = colors.cyan, TRANSFER = colors.cyan, AFTERBURNER = colors.red, FLIP = colors.orange, RETRO = colors.orange, SINK = colors.lightBlue, RELEASE = colors.lime, IMPACT = colors.red, CUT = colors.red, ABORT = colors.red, RECOVER = colors.orange }
+  local colorsFor = { IGNITION = colors.yellow, BOOST = colors.orange, CRUISE = colors.cyan, TRANSFER = colors.cyan, AFTERBURNER = colors.red, FLIP = colors.orange, RETRO = colors.orange, ASCENT = colors.magenta, DESCENT = colors.magenta, SINK = colors.lightBlue, RELEASE = colors.lime, IMPACT = colors.red, CUT = colors.red, ABORT = colors.red, RECOVER = colors.orange }
   header(fl.phase .. (fl.cut and (" " .. fl.cut) or "") .. " ", colorsFor[fl.phase] or colors.white)
   local p = fl.pos
   text(2, 3, "FLIGHT " .. mode, colors.yellow)
@@ -1357,13 +1429,13 @@ local function flight(tgt, pred)
       end
       if not g.rec then dir, done = guideStep(g, pos, vel, nose, dt) end
       if not done and not g.rec then
-        local ceil = math.max(g.start.y, g.tgt.y) + C.CEILING
+        local ceil = g.ob and g.ob.yA + C.ORBIT_CEIL or math.max(g.start.y, g.tgt.y) + C.CEILING
         if vel.y > 0 and pos.y + vel.y * vel.y / (2 * C.GRAV) > ceil then
           g.throttle = math.min(g.throttle, C.CEIL_THR)
           if g.abLock and g.abY > ceil - 50 then g.abY = ceil - 50 end
         end
       end
-      if dir and not done and (g.rec or g.phase == "TRANSFER" or g.phase == "SINK" or g.phase == "AFTERBURNER") then
+      if dir and not done and (g.rec or g.phase == "TRANSFER" or g.phase == "SINK" or g.phase == "AFTERBURNER" or g.phase == "ASCENT" or g.phase == "DESCENT") then
         g.cmdS = turnToward(g.cmdS or nose, unit(dir), math.rad(C.CMD_RATE) * dt)
         dir = g.cmdS
       else
@@ -1442,7 +1514,7 @@ local function flight(tgt, pred)
       else
         fl.gx, fl.gy, fl.r = 0, 0, 0
       end
-      if dir and (g.rec or g.phase == "AFTERBURNER" or g.phase == "TRANSFER" or g.phase == "FLIP") and (fl.err or 0) > C.AUTH_ERR and len(vel) > C.AUTH_V and not (vel.y > C.REC_CLIMB_V and nose.y > 0.7) then
+      if dir and (g.rec or FAST[g.phase] or g.phase == "TRANSFER") and (fl.err or 0) > C.AUTH_ERR and len(vel) > C.AUTH_V and not (vel.y > C.REC_CLIMB_V and nose.y > 0.7) then
         g.throttle = math.max(g.throttle, C.AUTH_THR)
       end
       E.set(g.throttle, fl.gx, fl.gy, fl.r)

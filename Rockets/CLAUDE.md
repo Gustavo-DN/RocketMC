@@ -39,11 +39,15 @@ for c in "TX=7000 TZ=0" "TX=4000 TZ=3000" "TX=1500 TZ=0" "TX=400 TZ=0" "TX=200 T
          "TX=7000 TZ=0 KAERO=0.045" "TX=7000 TZ=0 KAERO=0.015" "TX=7000 TZ=0 LATMAX=25" "TX=2500 TZ=2500 KLAT=1.0" \
          "TX=-3000 TZ=-5000 KLAT=0.8" "TX=5000 TZ=0 KAERO=0.04 KLAT=0.7" "TX=3000 TZ=-3000 TQMAX=1.8 LATMAX=16"; do run MODE=ARC $c; done
 for c in "TX=300 TZ=0" "TX=-400 TZ=600" "TX=1500 TZ=-900" "TX=-2500 TZ=300" "TX=300 TZ=0 KAERO=0.045"; do run MODE=NET $c; done
+for c in "TX=1600 TZ=0" "TX=3000 TZ=0" "TX=7000 TZ=0" "TX=12000 TZ=-2000" "TX=7000 TZ=0 KAERO=0.045"; do run MODE=ORBIT $c; done
+L="MASS=29.5 IPITCH=300 IROLL=39 KAERO=0.03 CAX=0.16"; for c in "TX=6760 TZ=0" "TX=2000 TZ=-1500" "TX=300 TZ=0"; do run MODE=NET $c $L; done
 ```
 
 Baseline to keep or beat:
 - ARC: all land; 15 of 16 within 1.4 blocks, worst 2.8. 400 blocks ≈ 75 s, 7,000 ≈ 111 s, 12,000 ≈ 130 s.
-- NET: 0.2–0.4 blocks, no CUT.
+- NET: 0.1–1.0 blocks, no CUT.
+- ORBIT (old rocket): all land within 2.5, 7,000 ≈ 118 s.
+- Light rocket (calibrated `L`): NET 6,760 ≈ 113 s, ~1 block.
 
 Any `TERMERR` line is a runtime error (the program's top-level pcall hides it otherwise).
 
