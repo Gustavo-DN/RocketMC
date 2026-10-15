@@ -21,6 +21,7 @@ local IP = tonumber(os.getenv("IPITCH") or 1144.4)
 local IR = tonumber(os.getenv("IROLL") or 61.5)
 local MR, PR, RR = 64.06 / MASS, 1144.4 / IP, 61.5 / IR
 local DMR = os.getenv("DRAGACC") and 1 or MR
+local DX, DZ = tonumber(os.getenv("DISTX") or 0), tonumber(os.getenv("DISTZ") or 0)
 local function phys(dt)
   local ax, ay, az, fx, fy, fz = 0, 0, 0, 0, 0, 0
   for i = 1, 4 do
@@ -57,9 +58,10 @@ local function phys(dt)
   if lm > LM then lx_, lz_ = lx_ * LM / lm, lz_ * LM / lm end
   fx, fy, fz = fx + lx_, fy - tonumber(os.getenv("CAX") or 0.12) * DMR * bv.y, fz + lz_
   local fw = qrot(S.q, { x = fx, y = fy, z = fz })
-  S.vel.x = S.vel.x + fw.x * dt
+  local dk = math.max(fy, 0) / 10.5
+  S.vel.x = S.vel.x + (fw.x + DX * dk) * dt
   S.vel.y = S.vel.y + (fw.y - 10.5) * dt
-  S.vel.z = S.vel.z + fw.z * dt
+  S.vel.z = S.vel.z + (fw.z + DZ * dk) * dt
   S.maxY = math.max(S.maxY or -999, S.pos.y)
   S.maxV = math.max(S.maxV or 0, math.sqrt(S.vel.x^2 + S.vel.y^2 + S.vel.z^2))
   S.pos.x, S.pos.y, S.pos.z = S.pos.x + S.vel.x * dt, S.pos.y + S.vel.y * dt, S.pos.z + S.vel.z * dt

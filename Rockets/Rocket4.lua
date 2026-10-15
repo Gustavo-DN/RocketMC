@@ -78,6 +78,9 @@ local C = {
   KVEL_MIN = 0.5,
   KVEL_V = 15,
   NET_KI = 0.25,
+  NET_HKI = 0.4,
+  NET_HIMAX = 2.0,
+  NET_HIV = 3,
   NET_TILT = 30,
   NET_SINK_TILT = 6,
   NET_POS_GAIN = 0.2,
@@ -393,7 +396,16 @@ end
 local function velCmd(g, vDes, vel, nose, dt, maxTilt, maxThr, capLift)
   if math.abs(vDes.y - vel.y) < 3 then g.bias = clamp(g.bias + C.NET_KI * (vDes.y - vel.y) * dt, -C.NET_BIAS, C.NET_BIAS) end
   local kv = C.KVEL_MIN + (C.NET_KVEL - C.KVEL_MIN) * clamp(len(vDes) / C.KVEL_V, 0, 1)
+  local ex, ez = vDes.x - vel.x, vDes.z - vel.z
+  local hi = g.phase == "TRANSFER" and not g.rec and len(vDes) < C.NET_HIV
+  if not hi then g.ix, g.iz = 0, 0 end
+  if hi and ex * ex + ez * ez < 9 then
+    g.ix, g.iz = g.ix + C.NET_HKI * ex * dt, g.iz + C.NET_HKI * ez * dt
+    local im = math.sqrt(g.ix * g.ix + g.iz * g.iz)
+    if im > C.NET_HIMAX then g.ix, g.iz = g.ix * C.NET_HIMAX / im, g.iz * C.NET_HIMAX / im end
+  end
   local acc = add(mul(sub(vDes, vel), kv), mul(vel, C.DRAG))
+  acc.x, acc.z = acc.x + g.ix, acc.z + g.iz
   acc.y = (vDes.y - vel.y) * C.NET_KVEL + vel.y * C.DRAG
   acc.y = acc.y + C.GRAV + g.bias
   local push = dot(nose, acc)
