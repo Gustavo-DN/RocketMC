@@ -13,7 +13,8 @@ local C = {
   MAX_LIFT_THR = 0.9,
   LIFTOFF_VY = 0.4,
   LIFTOFF_DH = 0.3,
-  ID_SETTLE = 0.6,
+  ID_SETTLE = 1.5,
+  ID_THR_K = 0.8,
   ID_AMP = 0.15,
   ID_T = 0.3,
   ID_GAP = 0.3,
@@ -23,13 +24,13 @@ local C = {
   KP = 2.0,
   KD = 2.2,
   KI = 0.4,
-  I_WIN = 15,
+  I_WIN = 10,
   I_MAX = 2.5,
   ERR_MAX = 0.6,
-  ALPHA_MAX = 2.0,
+  ALPHA_MAX = 3.0,
   GMAX = 0.8,
   CMD_RATE = 8,
-  SETTLE_T = 3,
+  SETTLE_T = 8,
 
   CLIMB_V = 6,
   CLIMB_DEC = 1.5,
@@ -60,14 +61,17 @@ local C = {
   MAX_CROSS = 40,
   MAX_ALT = 40,
   BAD_T = 1,
-  ERR_BAD = 25,
-  ERR_HARD = 45,
-  SPIN_BAD = 1.5,
-  SPIN_HARD = 3,
-  SPIN_T = 0.5,
+  ERR_BAD = 35,
+  ERR_HARD = 60,
+  SPIN_BAD = 2.5,
+  SPIN_HARD = 4,
+  SPIN_T = 1,
   GSAT_T = 2,
-  TOP_WIN = 10,
-  TOP_GAIN = 3,
+  TOP_WIN = 20,
+  TOP_MIN_T = 30,
+  MIN_ALT = 30,
+  RUN_RATE = 15,
+  TOP_GAIN = 2,
   MAX_T = 900,
 
   CLEAN_ERR = 10,
@@ -337,9 +341,9 @@ local function updateClean()
   local best
   for i = 1, #BAND_EDGES do
     local b = R.bands[i]
-    if not b then break end
-    if b.err > C.CLEAN_ERR or b.spin > C.CLEAN_SPIN or b.cross > C.CLEAN_CROSS or b.alt > C.CLEAN_ALT then break end
-    best = BAND_EDGES[i + 1] or BAND_EDGES[i]
+    if not b and best then break end
+    if b and (b.err > C.CLEAN_ERR or b.spin > C.CLEAN_SPIN or b.cross > C.CLEAN_CROSS or b.alt > C.CLEAN_ALT) then break end
+    if b then best = BAND_EDGES[i + 1] or BAND_EDGES[i] end
   end
   R.clean = best and math.min(best, R.peak) or nil
 end
@@ -392,7 +396,8 @@ local function run()
   local Iy, If, vT = 0, 0, 0
   local bad = { cross = 0, alt = 0, err = 0, spin = 0, sat = 0, ground = 0, land = 0 }
   local hist, nextLog = {}, 0
-  local holdT, descT = 0, 0
+  local holdT, descT, hovSum, hovN, vAcc, prevVy = 0, 0, 0, 0, 0, nil
+  local idSum, idN = 0, 0
   local altHold
   while true do
     S.thr = thrAvg > 0 and clamp(dither(thrAvg, "eT"), stage == "LIFT" and 0 or 1 / 15, 1) or 0
@@ -410,6 +415,8 @@ local function run()
     local vh = math.sqrt(vel.x * vel.x + vel.z * vel.z)
     local err = math.deg(math.acos(clamp(dot(nose, cmd), -1, 1)))
     local spin = math.sqrt(om.x * om.x + om.z * om.z)
+    if prevVy then vAcc = vAcc + ((vel.y - prevVy) / dt - vAcc) * math.min(1, dt / 0.5) end
+    prevVy = vel.y
     local vb = toBody(w, u, vel)
     local sp = len(vel)
     local aoaP = sp > 3 and math.deg(atan2(vb.z, vb.y)) or 0
@@ -436,7 +443,8 @@ local function run()
       S.gx, S.gy = 0, 0
       if vel.y > C.LIFTOFF_VY or rel.y > C.LIFTOFF_DH then
         note(string.format("LIFTOFF at throttle %.3f, %.1f s", thrAvg, t))
-        thrAvg = R.hover
+        R.idThr = C.ID_THR_K * thrAvg
+        thrAvg = R.idThr
         stage, st = "ID", 0
       elseif thrAvg >= C.MAX_LIFT_THR and st > 15 then
         S.thr, S.gx, S.gy = 0, 0, 0
@@ -447,7 +455,8 @@ local function run()
         return
       end
     elseif stage == "ID" then
-      thrAvg = R.hover * (1 + clamp(C.KVC * (0.5 - vel.y), -3, 3) / C.GRAV)
+      thrAvg = R.idThr * (1 + clamp(C.KVC * (0.5 - vel.y), -3, 3) / C.GRAV)
+      if st > C.ID_SETTLE then idSum, idN = idSum + (C.GRAV + vAcc) / thrAvg, idN + 1 end
       local a = math.min(1, dt / C.ID_TAU)
       gl.x = gl.x + (S.gx - gl.x) * a
       gl.y = gl.y + (S.gy - gl.y) * a
@@ -492,7 +501,12 @@ local function run()
         end
         M = { { cx[1], cx[2] }, { cz[1], cz[2] } }
         Mb = { clamp(cx[3], -0.5, 0.5), clamp(cz[3], -0.5, 0.5) }
-        thrRef = R.hover
+        thrRef = R.idThr
+        if idN > 5 then
+          R.tacc = clamp(idSum / idN, 0.5 * R.tacc, 2 * R.tacc)
+          R.hover = C.GRAV / R.tacc
+          note(string.format("THRUST about %.1f m/s2 at full throttle (hover %.3f)", R.tacc, R.hover))
+        end
         note(string.format("GIMBAL MAP ang_x = %+.2f*gx %+.2f*gy   ang_z = %+.2f*gx %+.2f*gy   (actual gimbal %s)", M[1][1], M[1][2], M[2][1], M[2][2], agx and "read" or "modelled"))
         save("CLIMBING")
         stage, st = "CLIMB", 0
@@ -544,22 +558,29 @@ local function run()
         aL = clamp(-C.KC * crossT - C.KCV * sideV, -C.AL_MAX, C.AL_MAX)
         if stage == "HOLD" then
           aF = clamp(-C.KC * alongP - C.KCV * along, -C.AL_MAX, C.AL_MAX)
-          if err < C.HOLD_ERR and spin < C.HOLD_SPIN and math.abs(altE) < 5 then holdT = holdT + dt else holdT = 0 end
-          if holdT >= C.HOLD_T then
+          if err < C.HOLD_ERR and spin < C.HOLD_SPIN and math.abs(altE) < 5 then
+            holdT = holdT + dt
+            hovSum, hovN = hovSum + thrAvg * math.max(nose.y, 0.5) * C.GRAV / math.max(C.GRAV + vAcc, 1), hovN + 1
+          else
+            holdT, hovSum, hovN = 0, 0, 0
+          end
+          if holdT >= C.HOLD_T or st > C.HOLD_MAX then
+            if holdT < C.HOLD_T then note("HOVER NOT CALM, GOING ANYWAY") end
+            local meas = hovN > 10 and C.GRAV / (hovSum / hovN) or R.tacc
+            note(string.format("MEASURED THRUST %.1f m/s2 at full throttle (estimate was %.1f)", meas, R.tacc))
+            R.tacc = clamp(meas, 0.5 * R.tacc, 2 * R.tacc)
+            Iy = 0
+            attI = { x = 0, z = 0 }
             stage, st = "RUN", 0
             R.runT, R.startPos, vT = 0, { x = pos.x, y = pos.y, z = pos.z }, math.max(along, 0)
             ring = {}
             note(string.format("RUN: accelerating %s (t %.1f)", R.dirName, t))
             save("RUNNING")
-          elseif st > C.HOLD_MAX then
-            stop("COULD NOT HOVER STEADY", along, t)
           end
         else
           R.runT = R.runT + dt
-          local acc = clamp(C.ACC_K * math.max(along, 0), C.ACC_MIN, C.ACC_MAX)
-          vT = math.min(vT + acc * dt, math.max(along, 0) + C.V_LEAD, C.SPEED_LIMIT + 20)
-          If = clamp(If + C.KIF * (vT - along) * dt, -5, R.tacc)
-          aF = acc + C.KSP * (vT - along) + If
+          aF = R.tacc
+          vT = along
         end
       end
       local lim2 = (R.tacc * C.THR_MAX) ^ 2 - aY * aY - aL * aL
@@ -568,8 +589,12 @@ local function run()
       if thrustSat then aF = aFmax end
       local W = add(add(mul(fwd, aF), mul(rgt, aL)), mul(UP, aY))
       local want = unit(W)
-      cmd = turnToward(cmd, want, math.rad(C.CMD_RATE) * dt)
-      thrAvg = clamp(len(W) / R.tacc / math.max(dot(nose, want), 0.5), 1 / 15, 1)
+      cmd = turnToward(cmd, want, math.rad(stage == "RUN" and C.RUN_RATE or C.CMD_RATE) * dt)
+      if stage == "RUN" then
+        thrAvg = clamp(aY / (R.tacc * math.max(nose.y, 0.02)), 1 / 15, 1)
+      else
+        thrAvg = clamp(len(W) / R.tacc / math.max(dot(nose, want), 0.5), 1 / 15, 1)
+      end
       S.gx, S.gy, sat = steer(cmd, thrAvg, dt)
       if stage == "RUN" and not R.reason then
         R.peak = math.max(R.peak, along)
@@ -580,17 +605,13 @@ local function run()
         bad.err = err > C.ERR_BAD and bad.err + dt or 0
         bad.spin = spin > C.SPIN_BAD and bad.spin + dt or 0
         bad.sat = sat and bad.sat + dt or 0
-        hist[#hist + 1] = { t = R.runT, v = along, s = thrustSat }
+        hist[#hist + 1] = { t = R.runT, v = along }
         while #hist > 2 and hist[1].t < R.runT - C.TOP_WIN do table.remove(hist, 1) end
-        local allSat = true
-        for _, hr in ipairs(hist) do if not hr.s then allSat = false break end end
         if along >= C.SPEED_LIMIT then stop("REACHED " .. C.SPEED_LIMIT .. " M/S", along, t)
-        elseif bad.cross > C.BAD_T then stop(string.format("OFF TRACK (%.0f blocks sideways)", crossT), along, t)
-        elseif bad.alt > C.BAD_T then stop(string.format("ALTITUDE LOST (%+.0f blocks)", altE), along, t)
+        elseif pos.y < start.y + C.MIN_ALT then stop(string.format("TOO LOW (%.0f above start)", pos.y - start.y), along, t)
         elseif err > C.ERR_HARD or bad.err > C.SPIN_T then stop(string.format("UNSTABLE: nose %.0f deg off", err), along, t)
         elseif spin > C.SPIN_HARD or bad.spin > C.SPIN_T then stop(string.format("UNSTABLE: spinning %.2f rad/s", spin), along, t)
-        elseif bad.sat > C.GSAT_T then stop("UNSTABLE: steering maxed out for " .. C.GSAT_T .. " s", along, t)
-        elseif allSat and R.runT - hist[1].t > C.TOP_WIN - 0.2 and along - hist[1].v < C.TOP_GAIN then stop(string.format("TOP SPEED (full throttle, gaining < %d m/s in %d s)", C.TOP_GAIN, C.TOP_WIN), along, t)
+        elseif R.runT > C.TOP_MIN_T and R.runT - hist[1].t > C.TOP_WIN - 0.2 and along - hist[1].v < C.TOP_GAIN then stop(string.format("TOP SPEED (gained < %d m/s in %d s at full throttle)", C.TOP_GAIN, C.TOP_WIN), along, t)
         elseif S.abort then stop("STOPPED BY YOU", along, t)
         elseif R.runT > C.MAX_T then stop("TIME LIMIT", along, t) end
         if R.bandSaved ~= bandOf(math.max(along, 0)) then R.bandSaved = bandOf(math.max(along, 0)) updateClean() save("RUNNING") end

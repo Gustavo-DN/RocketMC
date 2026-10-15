@@ -8,24 +8,14 @@ RocketLimitTest 150 east
 ```
 Default: 150 blocks, north. Backspace or Ctrl+T at any time ends the test and lands.
 
-## What it does
-1. LIFT: ramps the throttle until it lifts off.
-2. ID (about 2 s, a few blocks up): small gimbal kicks, measures how the gimbal turns the rocket (map). This makes it work whichever way the rocket was assembled.
-3. CLIMB at 6 m/s straight up to the height, holding position.
-4. HOLD 5 s steady (must be calm, else it stops).
-5. RUN: accelerates along the heading, slowly at first (1.5 m/s² up to 100 m/s, then 1.5 % of speed per s, max 8 m/s²), holding height and the track line with the thrust direction.
-6. Test ends on the first of:
-   - 1000 m/s;
-   - more than 40 blocks off the line or ±40 blocks off the height for 1 s;
-   - nose more than 25° off for 0.5 s (45° at once);
-   - spinning more than 1.5 rad/s for 0.5 s (3 at once);
-   - steering maxed out for 2 s;
-   - top speed reached (full throttle and less than 3 m/s gained in 10 s);
-   - Backspace;
-   - 15 minutes.
-7. RECOVER: slows down with the nose kept close to the flight path at high speed (flips back only below about 40–150 m/s), then DESCEND at 3 m/s straight down and cuts the engine once it sits still on the ground (anywhere). It never cuts the engine in the air.
+## What it does (v2, full throttle)
+1. LIFT, then ID (a couple of blocks up): gimbal kicks to learn steering, and it measures the real thrust.
+2. CLIMB at 6 m/s, HOLD 5 s (measures hover thrust again; goes anyway after 30 s if not calm).
+3. RUN: FULL THROTTLE straight away. Nose pitches over at 15°/s; the thrust is kept just above what holds the height and the rest goes forward. No speed ramp, no track or altitude limits (logged only).
+4. Ends only on: 1000 m/s, real top speed (< 2 m/s gained in 20 s at full throttle), loss of control (nose > 35° off for 1 s or > 60°, spin > 2.5 rad/s for 1 s or > 4), dropping to 30 blocks above the start, Backspace, or 15 min.
+5. Then brakes (nose kept near the flight path at high speed), descends at 3 m/s and cuts the engine on the ground.
 
-Expect a long trip. In the simulator, 0 → 767 m/s took ~4 min and ~75 km, and braking took another ~7 km. Keep the chunks loaded along the route.
+The first real run (v1) stopped at 73.8 m/s on a too-strict top-speed rule with a slow ramp; v2 replaces both.
 
 ## Results
 - `rocketlimit.txt`: stop reason, speed at stop, peak speed and fastest clean speed. Clean means every speed band up to it had nose error < 10°, spin < 0.3 rad/s, < 10 blocks off track and < 10 blocks off height. It also has the measured gimbal map, the end position, and a table per speed band (10 m/s bands to 100, then 25) with max error, spin, off-track, altitude, angle of attack and gimbal use. Rewritten at every band, so it survives a crash.
