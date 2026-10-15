@@ -2,6 +2,30 @@ local REMOTE = ...
 if type(REMOTE) ~= "table" then REMOTE = nil end
 local C = {
   ENGINE_TYPE = "liquid_vector_thruster",
+  NET_FLIP = true,
+  ARC_FLIP = true,
+  AB_FULL = true,
+  FLIP_ACC = 45,
+  TF_ACC = 19,
+  TF_RATE = 90,
+  TF_END = 160,
+  TF_OK = 20,
+  TF_MAX_T = 10,
+  RETRO_END_V = 20,
+  BRK_A = 2.4,
+  BRK_REF = 68.6,
+  BRK_B = 0.00317,
+  BRK_PAD = 30,
+  BRK_PAD_K = 0.08,
+  FLIP_MIN_V = 60,
+  RETRO_GRACE = 8,
+  AB_THRUST_HOLD = true,
+  AB_HOLD_AMAX = 5,
+  AB_BIAS_KI = 0.3,
+  AB_BIAS_MAX = 6,
+  AB_HOLD_CAP = 60,
+  AB_HOLD_CLIMBY = true,
+  AB_HOLD_VY = 8,
   TANK_TYPE = "fluid_storage",
   FLARE_SIDE = "top",
   FLARE_PULSE = 1.0,
@@ -112,7 +136,7 @@ local C = {
   FAST_ABRAKE = 7,
   AFTERBURNER = true,
   AB_MIN_DIST = 1000,
-  AB_VMAX = 500,
+  AB_VMAX = 350,
   AB_MARGIN = 120,
   AB_MAX_THR = 1.0,
   AB_PITCH_UP = 55,
@@ -130,7 +154,7 @@ local C = {
   AB_AOA_MAX = 45,
   AB_KLAT = 1.0,
   AB_LAT_VREF = 20,
-  AB_PITCH_RATE = 15,
+  AB_PITCH_RATE = 30,
   AB_PAD = 60,
   AB_BRAKE = 7,
   AB_REARM_D = 400,
@@ -356,7 +380,9 @@ local function tune()
   local ok, m = pcall(function() return sublevel.getMass() end)
   if ok and type(m) == "number" and m > 0 then
     E.mass = m
-    C.THRUST_ACC = math.min(C.THRUST_FORCE / m, C.ACC_CAP)
+    E.accFull = C.THRUST_FORCE / m
+    E.accCap = math.min(E.accFull, C.ACC_CAP)
+    C.THRUST_ACC = E.accCap
     E.tscale = C.THRUST_ACC * m / C.THRUST_FORCE
   end
   local ok2, it = pcall(function() return sublevel.getInertiaTensor() end)
@@ -370,6 +396,21 @@ local function tune()
   C.START_THRUST = clamp(E.hover * C.HOVER_START, 0.1, 0.8)
   C.MAX_THRUST = clamp(math.max(C.IGN_MAX, E.hover + 0.25), 0, 1)
   C.NET_MIN_THR = clamp(C.NET_MIN_ACC / ta, 0.05, 0.6)
+end
+
+local FAST = { AFTERBURNER = true, FLIP = true, RETRO = true }
+
+local function flipOn(g)
+  return ((g.mode == "NET" and C.NET_FLIP) or (g.mode == "ARC" and C.ARC_FLIP)) and (E.accFull or 0) >= C.FLIP_ACC
+end
+
+local function thrustMode(g)
+  if not (E.accFull and E.mass) then return end
+  local a = (C.AB_FULL and FAST[g.phase] and not g.rec) and E.accFull or E.accCap
+  if a == C.THRUST_ACC then return end
+  g.throttle = g.throttle * C.THRUST_ACC / a
+  C.THRUST_ACC = a
+  E.tscale = a * E.mass / C.THRUST_FORCE
 end
 
 local function newGuide(start, tgt, md, cl)
@@ -431,6 +472,15 @@ local function diveDir(g, pos, vel, nose, aim, nav)
   return unit(add(mul(rh, T), aLat))
 end
 
+local function holdPitch(g, pos, vel, dt)
+  local e = g.abY - pos.y
+  local vyc = clamp(C.AB_KALT / C.AB_KVY * e, -C.AB_HOLD_VY, C.AB_HOLD_VY)
+  g.abB = clamp((g.abB or 0) + C.AB_BIAS_KI * (vyc - vel.y) * dt, -C.AB_BIAS_MAX, C.AB_BIAS_MAX)
+  local ad = clamp(C.AB_KVY * (vyc - vel.y), -C.AB_HOLD_AMAX, C.AB_HOLD_AMAX)
+  local T = math.max(g.throttle, 0.05) * C.THRUST_ACC
+  return math.min(math.deg(math.asin(clamp((C.GRAV + ad + (g.abB or 0)) / T, -1, 1))), C.AB_HOLD_CAP)
+end
+
 local function levelDir(g, pos, vel, fx, fz, dt)
   dt = dt or 0.05
   local T = math.max(g.throttle, 0.05) * C.THRUST_ACC
@@ -445,7 +495,12 @@ local function levelDir(g, pos, vel, fx, fz, dt)
   if not g.abLock then
     g.abY = pos.y
     pitch = math.deg(math.asin(clamp((C.GRAV - C.AB_VDECEL) / T, -1, 1)))
-    if vel.y <= 0.5 then g.abLock, g.abA = true, math.max(pitch - gam, math.deg(math.asin(clamp(C.GRAV / T, 0, 1))) + C.AB_AOA_START) end
+    if vel.y <= 0.5 then
+      g.abLock, g.abA = true, math.max(pitch - gam, math.deg(math.asin(clamp(C.GRAV / T, 0, 1))) + C.AB_AOA_START)
+      if C.AB_THRUST_HOLD and C.AB_HOLD_CLIMBY and g.climbY < g.abY and flipOn(g) then g.abY = g.climbY end
+    end
+  elseif C.AB_THRUST_HOLD and flipOn(g) then
+    pitch = holdPitch(g, pos, vel, dt)
   else
     local e = g.abY - pos.y
     local ad = clamp(C.AB_KALT * e - C.AB_KVY * vel.y, -C.AB_AMAX, C.AB_AMAX)
@@ -509,25 +564,69 @@ local function guideStep(g, pos, vel, nose, dt)
     local dh = math.sqrt(hx * hx + hz * hz)
     local handoff = C.NET_VMAX * C.NET_VMAX / (2 * C.NET_ABRAKE) + C.AB_MARGIN
     local v = len(vel)
-    if g.tmode == "BRAKE" and dh - handoff > C.AB_REARM_D then
-      local sp0 = math.sqrt(C.NET_VMAX * C.NET_VMAX + 2 * C.AB_BRAKE * math.max(dh - handoff, 0))
-      if v < C.AB_REARM_K * sp0 then g.tmode = "AB" end
-    end
-    if dh <= handoff or (g.tmode == "BRAKE" and v <= C.NET_VMAX + 5 and dh - handoff <= C.AB_REARM_D) then
-      g.phase, g.tmode, g.bias = "TRANSFER", "AUTO", 0
-    elseif g.tmode == "BRAKE" or (dh - handoff) <= math.max(v * v - C.NET_VMAX * C.NET_VMAX, 0) / (2 * C.AB_BRAKE) + C.AB_PAD then
-      g.tmode = "BRAKE"
-      local sp = math.min(C.AB_VMAX, math.sqrt(C.NET_VMAX * C.NET_VMAX + 2 * C.AB_BRAKE * math.max(dh - handoff, 0)))
-      return velCmd(g, { x = hx / dh * sp, y = clamp((g.P.y - pos.y) * 0.5, -10, 10), z = hz / dh * sp }, vel, nose, dt, C.NET_TILT, C.AB_MAX_THR, true)
-    else
-      g.tmode = "AB"
-      local abFloor = math.min(C.AB_MAX_THR, (C.GRAV + 1) / (C.THRUST_ACC * math.max(math.sin(math.rad(C.AB_PITCH_UP)), 0.05)))
-      if v < C.AB_VMAX - 5 or g.throttle < abFloor then
-        g.throttle = math.min(g.throttle + C.SPLASH_RAMP * dt, C.AB_MAX_THR)
-      elseif v > C.AB_VMAX then
-        g.throttle = math.max(g.throttle - 1.5 * dt, abFloor)
+    if flipOn(g) then
+      local brk = (C.BRK_A * v + C.BRK_B * v * v) * C.BRK_REF / C.THRUST_ACC * (1 + C.BRK_PAD_K) + C.BRK_PAD
+      if v < C.FLIP_MIN_V and dh <= handoff then
+        g.phase, g.tmode, g.bias = "TRANSFER", "AUTO", 0
+      elseif v >= C.FLIP_MIN_V and dh <= brk then
+        local vh = math.sqrt(vel.x * vel.x + vel.z * vel.z)
+        g.phase, g.tmode, g.tfT = "FLIP", "FLIP", 0
+        g.flipTh = math.deg(math.asin(clamp(nose.y, -1, 1)))
+        g.flipF = vh > 1 and { x = vel.x / vh, y = 0, z = vel.z / vh } or { x = hx / dh, y = 0, z = hz / dh }
+      else
+        g.tmode = "AB"
+        local abFloor = math.min(C.AB_MAX_THR, (C.GRAV + 1) / (C.THRUST_ACC * math.max(math.sin(math.rad(C.AB_PITCH_UP)), 0.05)))
+        if v < C.AB_VMAX - 5 or g.throttle < abFloor then
+          g.throttle = math.min(g.throttle + C.SPLASH_RAMP * dt, C.AB_MAX_THR)
+        elseif v > C.AB_VMAX then
+          g.throttle = math.max(g.throttle - 1.5 * dt, abFloor)
+        end
+        return levelDir(g, pos, vel, hx / dh, hz / dh, dt)
       end
-      return levelDir(g, pos, vel, hx / dh, hz / dh, dt)
+    else
+      if g.tmode == "BRAKE" and dh - handoff > C.AB_REARM_D then
+        local sp0 = math.sqrt(C.NET_VMAX * C.NET_VMAX + 2 * C.AB_BRAKE * math.max(dh - handoff, 0))
+        if v < C.AB_REARM_K * sp0 then g.tmode = "AB" end
+      end
+      if dh <= handoff or (g.tmode == "BRAKE" and v <= C.NET_VMAX + 5 and dh - handoff <= C.AB_REARM_D) then
+        g.phase, g.tmode, g.bias = "TRANSFER", "AUTO", 0
+      elseif g.tmode == "BRAKE" or (dh - handoff) <= math.max(v * v - C.NET_VMAX * C.NET_VMAX, 0) / (2 * C.AB_BRAKE) + C.AB_PAD then
+        g.tmode = "BRAKE"
+        local sp = math.min(C.AB_VMAX, math.sqrt(C.NET_VMAX * C.NET_VMAX + 2 * C.AB_BRAKE * math.max(dh - handoff, 0)))
+        return velCmd(g, { x = hx / dh * sp, y = clamp((g.P.y - pos.y) * 0.5, -10, 10), z = hz / dh * sp }, vel, nose, dt, C.NET_TILT, C.AB_MAX_THR, true)
+      else
+        g.tmode = "AB"
+        local abFloor = math.min(C.AB_MAX_THR, (C.GRAV + 1) / (C.THRUST_ACC * math.max(math.sin(math.rad(C.AB_PITCH_UP)), 0.05)))
+        if v < C.AB_VMAX - 5 or g.throttle < abFloor then
+          g.throttle = math.min(g.throttle + C.SPLASH_RAMP * dt, C.AB_MAX_THR)
+        elseif v > C.AB_VMAX then
+          g.throttle = math.max(g.throttle - 1.5 * dt, abFloor)
+        end
+        return levelDir(g, pos, vel, hx / dh, hz / dh, dt)
+      end
+    end
+  end
+  if g.phase == "FLIP" then
+    g.throttle = math.min(C.TF_ACC / C.THRUST_ACC, C.AB_MAX_THR)
+    g.tfT = g.tfT + dt
+    g.flipTh = math.min(g.flipTh + C.TF_RATE * dt, C.TF_END)
+    local r = math.rad(g.flipTh)
+    local d = { x = g.flipF.x * math.cos(r), y = math.sin(r), z = g.flipF.z * math.cos(r) }
+    if (g.flipTh >= C.TF_END and math.deg(math.acos(clamp(dot(nose, d), -1, 1))) < C.TF_OK) or g.tfT > C.TF_MAX_T then
+      g.phase, g.tmode, g.abY, g.abB = "RETRO", "RETRO", pos.y, 0
+    else
+      return d
+    end
+  end
+  if g.phase == "RETRO" then
+    local vh = math.sqrt(vel.x * vel.x + vel.z * vel.z)
+    if vh < C.RETRO_END_V then
+      g.phase, g.tmode, g.bias = "TRANSFER", "AUTO", 0
+      if pos.y > g.P.y then g.P.y = pos.y end
+    else
+      g.throttle = C.AB_MAX_THR
+      local r = math.rad(holdPitch(g, pos, vel, dt))
+      return { x = -vel.x / vh * math.cos(r), y = math.sin(r), z = -vel.z / vh * math.cos(r) }
     end
   end
   if g.phase == "BOOST" then
@@ -1134,9 +1233,9 @@ local function safety(g, pos, nose, dir, om, dt, now)
   if g.rec or g.phase == "IGNITION" then return nil end
   local why
   if up then
-    local grace = g.safeFrom == "AFTERBURNER" and C.CUT_GRACE or 0
+    local grace = g.safeFrom == "RETRO" and C.RETRO_GRACE or ((g.safeFrom == "AFTERBURNER" or g.safeFrom == "FLIP") and C.CUT_GRACE or 0)
     if tilt > C.REC_TILT and now - g.safeT >= grace then why = "TILT" end
-  elseif dir then
+  elseif dir and g.phase ~= "FLIP" then
     if g.errPrev then g.closing = g.closing + ((g.errPrev - err) / dt - g.closing) * 0.2 end
     if err > C.CUT_ERR and g.closing < C.CUT_CLOSE then why = "ATTITUDE" end
   end
@@ -1153,7 +1252,14 @@ local function recoverStep(g, pos, vel, nose, om, dt)
     g.recOk = g.recOk + dt
     if g.recOk >= C.REC_HOLD then
       g.rec = false
-      if g.phase == "AFTERBURNER" then g.phase, g.tmode, g.bias = "TRANSFER", "AUTO", 0 end
+      if FAST[g.phase] then
+        local hx, hz = g.tgt.x - pos.x, g.tgt.z - pos.z
+        if flipOn(g) and math.sqrt(hx * hx + hz * hz) > C.AB_MIN_DIST then
+          g.phase, g.tmode, g.abLock, g.abB, g.abPitch = "AFTERBURNER", "AB", false, 0, nil
+        else
+          g.phase, g.tmode, g.bias = "TRANSFER", "AUTO", 0
+        end
+      end
       return nil
     end
   else
@@ -1168,7 +1274,7 @@ end
 
 local function drawFlight(start, tgt)
   clear()
-  local colorsFor = { IGNITION = colors.yellow, BOOST = colors.orange, CRUISE = colors.cyan, TRANSFER = colors.cyan, AFTERBURNER = colors.red, SINK = colors.lightBlue, RELEASE = colors.lime, IMPACT = colors.red, CUT = colors.red, ABORT = colors.red, RECOVER = colors.orange }
+  local colorsFor = { IGNITION = colors.yellow, BOOST = colors.orange, CRUISE = colors.cyan, TRANSFER = colors.cyan, AFTERBURNER = colors.red, FLIP = colors.orange, RETRO = colors.orange, SINK = colors.lightBlue, RELEASE = colors.lime, IMPACT = colors.red, CUT = colors.red, ABORT = colors.red, RECOVER = colors.orange }
   header(fl.phase .. (fl.cut and (" " .. fl.cut) or "") .. " ", colorsFor[fl.phase] or colors.white)
   local p = fl.pos
   text(2, 3, "FLIGHT " .. mode, colors.yellow)
@@ -1217,7 +1323,7 @@ local function flight(tgt, pred)
       g.sinkStarted = true
       sinkI.x, sinkI.z = 0, 0
     end
-    fl.gx, fl.gy = steer(dirW, w, u, om, dt, g.throttle, C.NET_ATT_BOOST and mode ~= "SPLASH" and (g.phase == "TRANSFER" or g.phase == "SINK"), sinking, g.phase == "AFTERBURNER", vel)
+    fl.gx, fl.gy = steer(dirW, w, u, om, dt, g.throttle, C.NET_ATT_BOOST and mode ~= "SPLASH" and (g.phase == "TRANSFER" or g.phase == "SINK"), sinking, FAST[g.phase], vel)
   end
   local function guide()
     local t0 = os.clock()
@@ -1273,7 +1379,12 @@ local function flight(tgt, pred)
           dir = recoverStep(g, pos, vel, nose, om, dt)
         end
       end
-      fl.phase, fl.tmode, fl.thr = g.rec and "RECOVER" or g.phase, g.tmode, g.throttle
+      thrustMode(g)
+      if g.phase ~= g.iPhase then
+        if g.phase == "FLIP" or g.iPhase == "FLIP" or g.iPhase == "RETRO" then attI.x, attI.z = 0, 0 end
+        g.iPhase = g.phase
+      end
+      fl.phase, fl.tmode, fl.thr = g.rec and "RECOVER" or g.phase, g.tmode, clamp(g.throttle, 0, 1) * (E.tscale or 1)
       fl.pos, fl.speed, fl.dist = pos, len(vel), len(sub(tgt, pos))
       if g.phase ~= "IGNITION" and g.phase ~= "BOOST" then track(tr, contactPoint(g, pos, nose), tgt) end
       if now >= nextTrail then
@@ -1283,7 +1394,7 @@ local function flight(tgt, pred)
       if flog and now >= nextLog then
         local dhx, dhz = tgt.x - pos.x, tgt.z - pos.z
         flog.writeLine(string.format("%.2f %s %.2f %.1f %.1f %.1f %.1f %.1f %+.2f %+.2f %.2f %.1f %+.2f %+.2f %d",
-          now - t0, fl.phase, g.throttle, len(vel), pos.y, len(sub(tgt, pos)), math.sqrt(dhx * dhx + dhz * dhz), fl.err or 0,
+          now - t0, fl.phase, fl.thr, len(vel), pos.y, len(sub(tgt, pos)), math.sqrt(dhx * dhx + dhz * dhz), fl.err or 0,
           fl.gx or 0, fl.gy or 0, len(om), fl.tilt or 0, fl.r or 0, om.y, math.floor(E.ms or 0)))
         flog.flush()
         nextLog = now + C.LOG_DT
@@ -1331,7 +1442,7 @@ local function flight(tgt, pred)
       else
         fl.gx, fl.gy, fl.r = 0, 0, 0
       end
-      if dir and (g.rec or g.phase == "AFTERBURNER" or g.phase == "TRANSFER") and (fl.err or 0) > C.AUTH_ERR and len(vel) > C.AUTH_V and not (vel.y > C.REC_CLIMB_V and nose.y > 0.7) then
+      if dir and (g.rec or g.phase == "AFTERBURNER" or g.phase == "TRANSFER" or g.phase == "FLIP") and (fl.err or 0) > C.AUTH_ERR and len(vel) > C.AUTH_V and not (vel.y > C.REC_CLIMB_V and nose.y > 0.7) then
         g.throttle = math.max(g.throttle, C.AUTH_THR)
       end
       E.set(g.throttle, fl.gx, fl.gy, fl.r)

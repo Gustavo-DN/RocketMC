@@ -166,3 +166,18 @@ KP 1.5, KD 1.6, ATT_KI 0.8, ATT_REF_THR 0.4, ROLL_KP 0.3, ROLL_KD 0.4, AERO_K 0.
 - The same flight: at 30° tilt TRANSFER only managed 3.5–7 m/s, which supports force-based drag (light rocket gets ~2× the drag deceleration). With force drag the thrust cap of 32 m/s² also caps nose-first speed near 120 m/s, so raising ACC_CAP (at least in AFTERBURNER) is the way to go faster.
 - Real hover throttle in program units was 0.42 vs the predicted 0.328: floor quantization makes the real thrust about half a step lower than commanded. The vertical bias integrator absorbs it.
 - Sim: DISTX/DISTZ add a steady world-frame side push that scales with thrust (to mimic the CoM offset).
+
+## 12. Flip brake and full-throttle afterburner (ported from the user's Transport.lua)
+- Transport.lua is the user's later fork of Rocket4 (NET-only menu, passwords, launch lock, self-delete, ENGINE_ORDER {2,3,1,0}, NET flip brake, new ARC dive, SPLASH renamed WATER). The user wants Rocket4 to keep SPLASH, ARC and NET, so only its flight upgrades were ported. Security features and ENGINE_ORDER were left out: the light rocket's VectorMap shows the standard sorted engine order, so ENGINE_ORDER would scramble it.
+- Ported: FLIP (rotate nose through vertical to 160° at TF_RATE) → RETRO (full throttle against velocity, pitch from `holdPitch`) → TRANSFER when horizontal speed < RETRO_END_V. Brake start distance `brk = (BRK_A·v + BRK_B·v²)·BRK_REF/THRUST_ACC·(1+BRK_PAD_K) + BRK_PAD`. AB thrust-hold pitch (`holdPitch`), AB_VMAX 350, AB_PITCH_RATE 30. Safety grace for FLIP/RETRO, no attitude-error recovery during FLIP, recovery resumes the afterburner when far, attitude integrator reset around FLIP/RETRO.
+- Changes vs Transport, from sim testing:
+  - Flip and thrust hold only switch on when full thrust ≥ FLIP_ACC (45 m/s²). Light rocket 68.6: on. Old rocket 31.6: keeps the proven tilt brake (thrust hold made it dive into the ground in the sim).
+  - BRK_A 2.4 (Transport 4.2) scaled by BRK_REF/THRUST_ACC. 4.2 ended the retro 440 blocks short and the light rocket crawled the rest at 7 m/s.
+  - Flip thrust is an acceleration (TF_ACC 19 m/s²) instead of throttle 0.6, which on the light rocket was 41 m/s² up and climbed it to ~470.
+  - `holdPitch` targets a climb rate capped at AB_HOLD_VY (8) and its bias integrates climb-rate error (AB_BIAS_KI 0.3, always on). Transport's version only integrated within 40 blocks and drifted up to 400–580 with lift.
+  - AB_VDECEL stays 5 (Transport 10): 10 plus pitch rate 30 caused 15 recoveries / 90° low tilt for the old rocket with strong sails.
+  - Kept Transport's `if pos.y > g.P.y then g.P.y = pos.y end` after RETRO: removing it improved accuracy in heavy-drag sims but caused up to 5 recoveries (tail-first descent while moving).
+- AB_FULL: AFTERBURNER/FLIP/RETRO run with real full thrust (`thrustMode` switches C.THRUST_ACC between E.accFull and E.accCap and rescales g.throttle so the real thrust is continuous). Recovery always uses the cap. The screen and flight.log `thr` now show the real engine throttle (g.throttle·E.tscale).
+- Real 6.7 km NET flight with the capped version: 198 s, miss 1.0, AB cruise only 82 m/s at 46% real throttle. Calibrated sim: MASS=29.5 IPITCH=300 IROLL=39 KAERO=0.03 CAX=0.16 (matches 79 m/s, 205 s, peak 234).
+- Sim results with the port, light rocket: 6,760 blocks ≈ 113–126 s, 12,000 ≈ 146 s, misses 0.3–2.4 in normal variants; 4–14 with a steady side push or KLAT 0.8 (sink from ~280). Old rocket: all 19 regression flights land, 7,000 ≈ 106 s (was 111).
+- SPLASH on the light rocket is untuned (sim misses 15–67 blocks, flies low at ~58). Full thrust in CRUISE didn't fix it. Unchanged for the old rocket.
