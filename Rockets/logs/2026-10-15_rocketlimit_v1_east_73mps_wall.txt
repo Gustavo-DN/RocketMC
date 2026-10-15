@@ -1,0 +1,29 @@
+SINGLE THRUSTER LIMIT TEST: LANDED
+MASS 8.50  THRUST 50.2 m/s2 per full throttle  HOVER 0.209
+GIMBAL MAP at throttle 0.209: ang_x = -0.04*gx -5.34*gy  ang_z = +5.55*gx +0.09*gy  (bias +0.01 +0.01)
+GIMBAL measured max move 0.048 per tick (0.95 per s)
+DIRECTION east (yaw -90)  HEIGHT +150  START -96.9 -57.6 -3001.3
+STOP: TOP SPEED (full throttle, gaining < 3 m/s in 10 s)
+SPEED AT STOP 73.8 m/s at 71.8 s of run, 3072 blocks down track
+PEAK SPEED 73.8 m/s
+FASTEST CLEAN SPEED none (every band up to it: error < 10 deg, spin < 0.3, off track < 10, altitude < 10)
+ENDED AT 3247 -58 -3008
+
+speed_band   time_s  max_err  max_spin  max_off  max_alt  max_aoa  gimbal_avg  gimbal_max  sat%
+   0-10        6.7      9.4      0.12      1.0     11.4     50.6       0.098       0.133     0
+  10-20        5.3      9.9      0.13      1.6     20.6     20.8       0.114       0.200     0
+  20-30        8.5      8.7      0.11      1.8     25.7     13.4       0.065       0.133     0
+  30-40        8.5      6.0      0.08      1.4     27.5      8.6       0.044       0.067     0
+  40-50        8.4      3.6      0.05      1.3     27.6      6.2       0.030       0.067     0
+  50-60        8.4      2.8      0.04      1.4     27.4      4.8       0.021       0.067     0
+  60-70        9.0      2.0      0.05      1.2     26.4      3.9       0.015       0.067     0
+  70-80       13.8      2.0      0.05      1.3     24.9      3.3       0.013       0.067     0
+
+START mass 8.50, thrust 50.2 m/s2, hover throttle 0.209, 1 fuel tank(s), heading east, height +150
+LIFTOFF at throttle 0.250, 1.2 s
+GIMBAL MAP ang_x = -0.04*gx -5.34*gy   ang_z = +5.55*gx +0.09*gy   (actual gimbal read)
+AT HEIGHT, holding (t 28.1)
+RUN: accelerating east (t 33.1)
+TEST END: TOP SPEED (full throttle, gaining < 3 m/s in 10 s) at 73.8 m/s (t 104.9)
+STOPPED at 3244 141 -3008, descending
+LANDED at 3247 -58 -3008, tilt 0 deg
