@@ -68,7 +68,7 @@ local C = {
   SPIN_T = 1,
   GSAT_T = 2,
   TOP_WIN = 20,
-  TOP_MIN_T = 600,
+  TOP_MIN_T = 60,
   MIN_ALT = 30,
   RUN_RATE = 15,
   TOP_GAIN = 2,
@@ -182,13 +182,17 @@ if not fwd or height < C.HEIGHT_MIN or height > C.HEIGHT_MAX then
 end
 local rgt = { x = -fwd.z, y = 0, z = fwd.x }
 
-local engName
+local engNames = {}
 for _, n in ipairs(peripheral.getNames()) do
-  if peripheral.hasType(n, C.ENGINE_TYPE) and (not engName or n == "bottom") then engName = n end
+  if peripheral.hasType(n, C.ENGINE_TYPE) then engNames[#engNames + 1] = n end
 end
+table.sort(engNames)
+local engName = engNames[1]
 if not engName then print("No liquid vector thruster found.") return end
 if not sublevel then print("Not on a Sable sub-level (no sublevel API).") return end
-local eng = peripheral.wrap(engName)
+local engs = {}
+for i, n in ipairs(engNames) do engs[i] = peripheral.wrap(n) end
+local eng = engs[1]
 local tanks = {}
 for _, n in ipairs(peripheral.getNames()) do
   if n ~= engName and peripheral.hasType(n, "fluid_storage") and not peripheral.hasType(n, C.ENGINE_TYPE) then tanks[#tanks + 1] = n end
@@ -205,8 +209,10 @@ local function tick(send)
     function() o = sublevel.getAngularVelocity() end,
   }
   if send ~= false then
-    fns[#fns + 1] = function() eng.setThrustNormalized(S.thr) end
-    fns[#fns + 1] = function() eng.setVector(S.gx, S.gy) end
+    for _, e in ipairs(engs) do
+      fns[#fns + 1] = function() e.setThrustNormalized(S.thr) end
+      fns[#fns + 1] = function() e.setVector(S.gx, S.gy) end
+    end
   end
   agx, agy = nil, nil
   if eng.getVectorX then fns[#fns + 1] = function() local ok, r = pcall(eng.getVectorX) if ok and type(r) == "number" then agx = r end end end
@@ -224,7 +230,7 @@ local function tick(send)
     end
     for _, n in ipairs(tanks) do
       local tn = n
-      fns[#fns + 1] = function() pcall(eng.pullFluid, tn) end
+      for _, e in ipairs(engs) do fns[#fns + 1] = function() pcall(e.pullFluid, tn) end end
     end
   end
   parallel.waitForAll(unpack(fns))
@@ -313,7 +319,7 @@ local function save(status)
   local out = fs.open(C.SUMMARY, "w")
   if not out then return end
   local L = function(s) out.writeLine(s) end
-  L("SINGLE THRUSTER LIMIT TEST: " .. status)
+  L("ROCKET LIMIT TEST: " .. status)
   L(string.format("MASS %.2f  THRUST %.1f m/s2 per full throttle  HOVER %.3f", R.mass or 0, R.tacc or 0, R.hover or 0))
   if M then L(string.format("GIMBAL MAP at throttle %.3f: ang_x = %+.2f*gx %+.2f*gy  ang_z = %+.2f*gx %+.2f*gy  (bias %+.2f %+.2f)", thrRef, M[1][1], M[1][2], M[2][1], M[2][2], Mb[1], Mb[2])) end
   if R.slew then L(string.format("GIMBAL measured max move %.3f per tick (%.2f per s)", R.slew, R.slew * 20)) end
@@ -368,7 +374,7 @@ local function run()
   local ix, iy, iz = it[1][1] or it[1].x, it[2][2] or it[2].y, it[3][3] or it[3].z
   if not R.mass or R.mass <= 0 or not ix then error("Could not read mass/inertia", 0) end
   if not (iy < ix and iy < iz) then error("Rocket is not assembled upright (body Y must be the long axis). Re-assemble standing up.", 0) end
-  R.tacc = C.THRUST_FORCE / R.mass
+  R.tacc = C.THRUST_FORCE * #engs / R.mass
   R.hover = C.GRAV / R.tacc
   tick(false)
   local nose = rotate(w, u, UP)
@@ -380,7 +386,7 @@ local function run()
   if fs.exists(C.LOG) then pcall(fs.delete, C.LOG .. ".old") pcall(fs.move, C.LOG, C.LOG .. ".old") end
   if fs.exists(C.SUMMARY) then pcall(fs.delete, C.SUMMARY .. ".old") pcall(fs.move, C.SUMMARY, C.SUMMARY .. ".old") end
   log = fs.open(C.LOG, "w")
-  note(string.format("START mass %.2f, thrust %.1f m/s2, hover throttle %.3f, %d fuel tank(s), heading %s, height +%d", R.mass, R.tacc, R.hover, #tanks, R.dirName, height))
+  note(string.format("START mass %.2f, thrust %.1f m/s2, hover throttle %.3f, %d fuel tank(s), %d thruster(s), heading %s, height +%d", R.mass, R.tacc, R.hover, #tanks, #engs, R.dirName, height))
   print("Backspace or Ctrl+T: end the test and land.")
   for i = C.COUNTDOWN, 1, -1 do
     if S.abort then R.reason = "CANCELLED ON PAD" save("CANCELLED") return end
@@ -656,7 +662,7 @@ if not ok then
   local high = pos and R.y0 and pos.y > R.y0 + 3
   S.thr = high and clamp(R.hover or 0.14, 1 / 15, 1) or 0
   S.gx, S.gy = 0, 0
-  pcall(parallel.waitForAll, function() eng.setThrustNormalized(S.thr) end, function() eng.setVector(0, 0) end)
+  for _, en in ipairs(engs) do pcall(parallel.waitForAll, function() en.setThrustNormalized(S.thr) end, function() en.setVector(0, 0) end) end
   pcall(save, "PROGRAM ERROR: " .. tostring(e))
   print("ERROR: " .. tostring(e))
   if high then print("Engine left at hover with the gimbal centred. Take over manually.") end
