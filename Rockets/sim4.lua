@@ -16,6 +16,11 @@ for i = 1, 4 do E[i] = { thr = 0, tx = 0, ty = 0, gx = 0, gy = 0 } end
 local SX, SY = { 1, 1, -1, -1 }, { 1, -1, 1, -1 }
 local GXZ = { 0.36, 0.44, 0.44, 0.44 }
 local K_AERO = tonumber(os.getenv("KAERO") or 0.03)
+local MASS = tonumber(os.getenv("MASS") or 64.06)
+local IP = tonumber(os.getenv("IPITCH") or 1144.4)
+local IR = tonumber(os.getenv("IROLL") or 61.5)
+local MR, PR, RR = 64.06 / MASS, 1144.4 / IP, 61.5 / IR
+local DMR = os.getenv("DRAGACC") and 1 or MR
 local function phys(dt)
   local ax, ay, az, fx, fy, fz = 0, 0, 0, 0, 0, 0
   for i = 1, 4 do
@@ -25,17 +30,18 @@ local function phys(dt)
     e.gy = e.gy + (e.ty - e.gy) * a
     local tq = math.floor(e.thr * 15 + 1e-9) / 15
     local k = tq / 0.335
-    az = az + GXZ[i] * e.gx * k
-    ax = ax - 0.41 * e.gy * k
-    ay = ay + (0.55 * SX[i] * e.gx + 0.52 * SY[i] * e.gy) * k
-    fy = fy + 31.6 / 4 * tq
-    fx = fx + 1.75 * e.gx * k
-    fz = fz + 1.80 * e.gy * k
+    az = az + GXZ[i] * e.gx * k * PR
+    ax = ax - 0.41 * e.gy * k * PR
+    ay = ay + (0.55 * SX[i] * e.gx + 0.52 * SY[i] * e.gy) * k * RR
+    fy = fy + 31.6 / 4 * tq * MR
+    fx = fx + 1.75 * e.gx * k * MR
+    fz = fz + 1.80 * e.gy * k * MR
   end
   local bv = qrot({ w = S.q.w, x = -S.q.x, y = -S.q.y, z = -S.q.z }, S.vel)
   local TQ = tonumber(os.getenv("TQMAX") or 1.2)
-  local tx_, tz_ = K_AERO * bv.z, -K_AERO * bv.x
+  local tx_, tz_ = K_AERO * PR * bv.z, -K_AERO * PR * bv.x
   local tm = math.sqrt(tx_ * tx_ + tz_ * tz_)
+  TQ = TQ * PR
   if tm > TQ then tx_, tz_ = tx_ * TQ / tm, tz_ * TQ / tm end
   ax = ax + tx_
   az = az + tz_
@@ -45,10 +51,11 @@ local function phys(dt)
   S.q = { w = d.w / n, x = d.x / n, y = d.y / n, z = d.z / n }
   local KL = tonumber(os.getenv("KLAT") or 0.5)
   local LM = tonumber(os.getenv("LATMAX") or 12)
+  KL, LM = KL * DMR, LM * DMR
   local lx_, lz_ = -KL * bv.x, -KL * bv.z
   local lm = math.sqrt(lx_ * lx_ + lz_ * lz_)
   if lm > LM then lx_, lz_ = lx_ * LM / lm, lz_ * LM / lm end
-  fx, fy, fz = fx + lx_, fy - tonumber(os.getenv("CAX") or 0.12) * bv.y, fz + lz_
+  fx, fy, fz = fx + lx_, fy - tonumber(os.getenv("CAX") or 0.12) * DMR * bv.y, fz + lz_
   local fw = qrot(S.q, { x = fx, y = fy, z = fz })
   S.vel.x = S.vel.x + fw.x * dt
   S.vel.y = S.vel.y + (fw.y - 10.5) * dt
@@ -105,8 +112,8 @@ sublevel = {
   getLogicalPose = function() return { position = { x = S.pos.x, y = S.pos.y, z = S.pos.z }, orientation = { w = S.q.w, x = S.q.x, y = S.q.y, z = S.q.z } } end,
   getLinearVelocity = function() return { x = S.vel.x, y = S.vel.y, z = S.vel.z } end,
   getAngularVelocity = function() return { x = S.om.x, y = S.om.y, z = S.om.z } end,
-  getMass = function() return 64.06 end,
-  getInertiaTensor = function() return { { 1144.4, 0, 0 }, { 0, 61.5, 0 }, { 0, 0, 1144.4 } } end,
+  getMass = function() return MASS end,
+  getInertiaTensor = function() return { { IP, 0, 0 }, { 0, IR, 0 }, { 0, 0, IP } } end,
 }
 fs = { open = function(p, m)
   local f = io.open("sim_" .. p, m == "a" and "a" or (m == "r" and "r" or "w"))

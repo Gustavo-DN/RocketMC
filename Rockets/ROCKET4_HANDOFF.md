@@ -112,7 +112,7 @@ Model (all measured values above):
 - gravity 10.5
 - net floor at target (TY -58, ±8 blocks), pad floor -53.3
 
-Env overrides: KAERO, KLAT, LATMAX, TQMAX, CAX, TX, TZ, MODE, TMAX.
+Env overrides: KAERO, KLAT, LATMAX, TQMAX, CAX, TX, TZ, MODE, TMAX. Airframe: MASS (default 64.06), IPITCH (1144.4), IROLL (61.5) rescale thrust, gimbal, sail and drag effects and feed getMass/getInertiaTensor. Drag is treated as a force (lighter = more drag deceleration); set DRAGACC=1 to keep drag as a fixed deceleration instead.
 
 Calibration check: the simulator reproduced the old AFTERBURNER wobble (tilt 30–87°), the SPIN crash of the lift-model version, the old NET hover oscillation, and the old TRANSFER crawl. Not exact at 240 m/s.
 
