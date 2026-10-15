@@ -378,7 +378,7 @@ local function newGuide(start, tgt, md, cl)
     start = start, tgt = tgt, mode = md, climb = cl, climbY = climbY,
     P = { x = tgt.x, y = math.max(climbY, tgt.y + C.NET_HOVER), z = tgt.z },
     phase = "IGNITION", tmode = "RAMP", throttle = C.START_THRUST,
-    cmd = { x = 0, y = 1, z = 0 }, bias = 0,
+    cmd = { x = 0, y = 1, z = 0 }, bias = 0, ix = 0, iz = 0,
   }
 end
 
