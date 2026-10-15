@@ -32,6 +32,7 @@ local C = {
   AERO_VMAX = 25,
   AERO_MAX = 0.6,
   THRUST_ACC = 31,
+  ACC_CAP = 32,
   HOVER_START = 0.75,
   IGN_MAX = 0.85,
   MAX_THRUST = 0.85,
@@ -234,7 +235,7 @@ function E.set(thr, gx, gy, r)
   thr = clamp(thr, 0, 1)
   for i = 1, E.N do
     local c = E.cmd[i]
-    c[1] = thr
+    c[1] = thr * (E.tscale or 1)
     c[2] = clamp(gx + (E.sx[i] or 0) * r, -1, 1)
     c[3] = clamp(gy + (E.sy[i] or 0) * r, -1, 1)
   end
@@ -352,7 +353,8 @@ local function tune()
   local ok, m = pcall(function() return sublevel.getMass() end)
   if ok and type(m) == "number" and m > 0 then
     E.mass = m
-    C.THRUST_ACC = C.THRUST_FORCE / m
+    C.THRUST_ACC = math.min(C.THRUST_FORCE / m, C.ACC_CAP)
+    E.tscale = C.THRUST_ACC * m / C.THRUST_FORCE
   end
   local ok2, it = pcall(function() return sublevel.getInertiaTensor() end)
   local d = ok2 and diag(it)

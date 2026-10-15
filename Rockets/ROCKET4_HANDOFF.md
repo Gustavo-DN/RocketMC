@@ -151,3 +151,14 @@ Always re-run the NET + ARC matrix after edits. The regression test caught a rea
 
 ## 10. Key constants (current values)
 KP 1.5, KD 1.6, ATT_KI 0.8, ATT_REF_THR 0.4, ROLL_KP 0.3, ROLL_KD 0.4, AERO_K 0.03, AERO_VMAX 25, THRUST_FORCE 2025, NOSE_OFFSET 12.7, TAIL_OFFSET 4.8, NET_VMAX 30, NET_TILT 30, NET_VDESC 12, NET_SLOW 15, NET_SINK 2, NET_SINK_TILT 6, KVEL_MIN 0.5, NET_POS_GAIN 0.2, AB_VMAX 500, AB_KALT 0.05, AB_KVY 0.4, AB_KA 1.5, AB_PITCH_RATE 15, AB_PITCH_UP 55, AB_PITCH_DOWN 10, AB_BRAKE 7, AB_REARM_D 400, AB_REARM_K 0.5, AB_MIN_DIST 1000, ARC_AB_MIN 1000, REC_TILT 45, CUT_TILT 60, CUT_LOW 20, REC_MAX_T 8, AUTH_ERR 20, AUTH_THR 0.45, CEILING 700, CMD_RATE 20.
+
+## 11. Light Rocket4 (new airframe, VectorMap run 3, full 18 tests)
+- Shorter and lighter. Mass 29.5. Inertia pitch/yaw 112.3, roll 31.2. Hover throttle ≈ 0.19 (between quantized steps 2/15 and 3/15, so it dithers). THRUST_FORCE ≈ 2000 (same engines).
+- Gimbal lag unchanged (t63 0.17–0.22 s). Engine layout and sign pattern unchanged.
+- Collective per unit at hover: ALL GX ang_z +4.13, acc_x +4.7; ALL GY ang_x -3.10, acc_z +6.2; ROLL 4.12. About 2–2.5× the old pitch/yaw authority. The right-hand engines (E2, E4) pitch about 40% harder on GY: the CoM is off-center.
+- One throttle step on one engine tips it ≈ 20° within 1 s, so differential throttle is strong now (unused by Rocket4).
+- 10° step test: rise ≈ 1 s, then a slow 2–4° wobble and drift; ends about 3° off. Slightly underdamped.
+- Server lag: freezes of 0.54–0.63 s seen (looks like teleporting in game). The sim models them with LAGP (chance per loop of a 0.6 s freeze) and SEED.
+- Thrust limiter: `ACC_CAP` (32) caps the thrust acceleration the program plans with; `E.tscale` scales the real throttle in `E.set`. The old rocket (31.6) is unaffected. The light rocket then flies like the old one in its linear dynamics.
+- Sim stand-in: `MASS=29.5 IPITCH=300 IROLL=39` (effective values that reproduce the measured collective responses).
+- Unknowns: sail strength (KAERO) and whether drag acts as a force (default) or as a fixed deceleration (DRAGACC=1). With strong sails plus low drag, long ARC flights still fail in the sim; short NET hops land in every case. Measure both from a real NET hop's flight.log before raising ACC_CAP or flying long ARC trips.

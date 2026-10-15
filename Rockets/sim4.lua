@@ -95,7 +95,9 @@ sleep = function(s) advance(s) end
 os.pullEvent = function() return "timer", 1 end
 os.startTimer = function() return 1 end
 os.queueEvent = function() end
-parallel = { waitForAll = function(...) for _, f in ipairs({ ... }) do f() end advance(0.05) end,
+local LAGP = tonumber(os.getenv("LAGP") or 0)
+math.randomseed(tonumber(os.getenv("SEED") or 1))
+parallel = { waitForAll = function(...) for _, f in ipairs({ ... }) do f() end advance(math.random() < LAGP and 0.6 or 0.05) end,
   waitForAny = function(f) f() end }
 local names = { "liquid_vector_thruster_0", "liquid_vector_thruster_1", "liquid_vector_thruster_2", "liquid_vector_thruster_3", "tank" }
 peripheral = { getNames = function() return names end,
