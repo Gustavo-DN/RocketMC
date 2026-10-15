@@ -13,11 +13,11 @@ local C = {
   MAX_LIFT_THR = 0.9,
   LIFTOFF_VY = 0.4,
   LIFTOFF_DH = 0.3,
-  ID_SETTLE = 1.5,
+  ID_SETTLE = 0.6,
   ID_THR_K = 0.8,
-  ID_AMP = 0.15,
-  ID_T = 0.3,
-  ID_GAP = 0.3,
+  ID_AMP = 0.1,
+  ID_T = 0.25,
+  ID_GAP = 0.25,
   ID_MIN_DET = 0.05,
   ID_TAU = 0.23,
 
@@ -27,8 +27,12 @@ local C = {
   I_WIN = 10,
   I_MAX = 2.5,
   ERR_MAX = 0.6,
-  ALPHA_MAX = 3.0,
-  GMAX = 0.8,
+  ALPHA_MAX = 2.0,
+  GMAX = 0.3,
+  LEAD = 0.25,
+  ACC_TAU = 0.15,
+  ACC_LIM = 10,
+  BIAS_TAU = 0.7,
   CMD_RATE = 8,
   SETTLE_T = 8,
 
@@ -249,6 +253,7 @@ end
 local R = { reason = nil, stage = "PAD", bands = {}, peak = 0, events = {} }
 local M, thrRef, Mb
 local attI = { x = 0, z = 0 }
+local accF = { x = 0, z = 0, bx = 0, bz = 0 }
 
 local function steer(cmd, thrAvg, dt)
   local d = unit(toBody(w, u, cmd))
@@ -264,9 +269,23 @@ local function steer(cmd, thrAvg, dt)
     attI.x = clamp(attI.x + ex * dt, -C.I_MAX / math.max(C.KI, 1e-6), C.I_MAX / math.max(C.KI, 1e-6))
     attI.z = clamp(attI.z + ez * dt, -C.I_MAX / math.max(C.KI, 1e-6), C.I_MAX / math.max(C.KI, 1e-6))
   end
-  local ax = clamp(C.KP * ex + C.KI * attI.x - C.KD * om.x - Mb[1], -C.ALPHA_MAX, C.ALPHA_MAX)
-  local az = clamp(C.KP * ez + C.KI * attI.z - C.KD * om.z - Mb[2], -C.ALPHA_MAX, C.ALPHA_MAX)
-  local k = math.max(thrAvg, 1 / 15) / thrRef
+  local k = math.max(thrAvg, 0.01) / thrRef
+  if accF.px then
+    local f = math.min(1, dt / C.ACC_TAU)
+    accF.x = accF.x + (clamp((om.x - accF.px) / dt, -C.ACC_LIM, C.ACC_LIM) - accF.x) * f
+    accF.z = accF.z + (clamp((om.z - accF.pz) / dt, -C.ACC_LIM, C.ACC_LIM) - accF.z) * f
+  end
+  accF.px, accF.pz = om.x, om.z
+  local wx, wz = om.x + C.LEAD * accF.x, om.z + C.LEAD * accF.z
+  if agx and agy then
+    local f = math.min(1, dt / C.BIAS_TAU)
+    accF.bx = accF.bx + (accF.x - k * (M[1][1] * agx + M[1][2] * agy) - accF.bx) * f
+    accF.bz = accF.bz + (accF.z - k * (M[2][1] * agx + M[2][2] * agy) - accF.bz) * f
+  else
+    accF.bx, accF.bz = Mb[1] * k, Mb[2] * k
+  end
+  local ax = clamp(C.KP * ex + C.KI * attI.x - C.KD * wx - accF.bx, -C.ALPHA_MAX * math.max(k, 1), C.ALPHA_MAX * math.max(k, 1))
+  local az = clamp(C.KP * ez + C.KI * attI.z - C.KD * wz - accF.bz, -C.ALPHA_MAX * math.max(k, 1), C.ALPHA_MAX * math.max(k, 1))
   local det = (M[1][1] * M[2][2] - M[1][2] * M[2][1]) * k
   local gx = (M[2][2] * ax - M[1][2] * az) / det
   local gy = (-M[2][1] * ax + M[1][1] * az) / det
@@ -403,10 +422,10 @@ local function run()
   local bad = { cross = 0, alt = 0, err = 0, spin = 0, sat = 0, ground = 0, land = 0 }
   local hist, nextLog = {}, 0
   local holdT, descT, hovSum, hovN, vAcc, prevVy = 0, 0, 0, 0, 0, nil
-  local idSum, idN = 0, 0
+  local idSum, idN, idThrSum = 0, 0, 0
   local altHold
   while true do
-    S.thr = thrAvg > 0 and clamp(dither(thrAvg, "eT"), stage == "LIFT" and 0 or 1 / 15, 1) or 0
+    S.thr = thrAvg > 0 and clamp(dither(thrAvg, "eT"), 0, 1) or 0
     tick(true)
     local tn = now()
     local dt = clamp(tn - tl, 0.01, 0.3)
@@ -449,7 +468,7 @@ local function run()
       S.gx, S.gy = 0, 0
       if vel.y > C.LIFTOFF_VY or rel.y > C.LIFTOFF_DH then
         note(string.format("LIFTOFF at throttle %.3f, %.1f s", thrAvg, t))
-        R.idThr = C.ID_THR_K * thrAvg
+        R.idThr = math.min(C.ID_THR_K * thrAvg, 1.05 * R.hover)
         thrAvg = R.idThr
         stage, st = "ID", 0
       elseif thrAvg >= C.MAX_LIFT_THR and st > 15 then
@@ -461,8 +480,9 @@ local function run()
         return
       end
     elseif stage == "ID" then
+      R.idThr = clamp(R.idThr * (1 + 0.1 * (0.5 - vel.y) * dt), 0.01, 0.9)
       thrAvg = R.idThr * (1 + clamp(C.KVC * (0.5 - vel.y), -3, 3) / C.GRAV)
-      if st > C.ID_SETTLE then idSum, idN = idSum + (C.GRAV + vAcc) / thrAvg, idN + 1 end
+      if st > C.ID_SETTLE then idSum, idN, idThrSum = idSum + (C.GRAV + vAcc) / thrAvg, idN + 1, idThrSum + thrAvg end
       local a = math.min(1, dt / C.ID_TAU)
       gl.x = gl.x + (S.gx - gl.x) * a
       gl.y = gl.y + (S.gy - gl.y) * a
@@ -507,7 +527,7 @@ local function run()
         end
         M = { { cx[1], cx[2] }, { cz[1], cz[2] } }
         Mb = { clamp(cx[3], -0.5, 0.5), clamp(cz[3], -0.5, 0.5) }
-        thrRef = R.idThr
+        thrRef = idN > 0 and idThrSum / idN or R.idThr
         if idN > 5 then
           R.tacc = clamp(idSum / idN, 0.5 * R.tacc, 2 * R.tacc)
           R.hover = C.GRAV / R.tacc
@@ -597,9 +617,9 @@ local function run()
       local want = unit(W)
       cmd = turnToward(cmd, want, math.rad(stage == "RUN" and C.RUN_RATE or C.CMD_RATE) * dt)
       if stage == "RUN" then
-        thrAvg = clamp(aY / (R.tacc * math.max(nose.y, 0.02)), 1 / 15, 1)
+        thrAvg = clamp(aY / (R.tacc * math.max(nose.y, 0.02)), 0.005, 1)
       else
-        thrAvg = clamp(len(W) / R.tacc / math.max(dot(nose, want), 0.5), 1 / 15, 1)
+        thrAvg = clamp(len(W) / R.tacc / math.max(dot(nose, want), 0.5), 0.005, 1)
       end
       S.gx, S.gy, sat = steer(cmd, thrAvg, dt)
       if stage == "RUN" and not R.reason then

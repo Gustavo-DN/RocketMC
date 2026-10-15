@@ -32,6 +32,8 @@ local KAERO = tonumber(os.getenv("KAERO") or 0)
 local TQMAX = tonumber(os.getenv("TQMAX") or 1e9)
 local TMAX = tonumber(os.getenv("TMAX") or 300)
 local SLEW = tonumber(os.getenv("SLEW") or 1e9)
+local BIASX = tonumber(os.getenv("BIASX") or 0)
+local BIASZ = tonumber(os.getenv("BIASZ") or 0)
 local NOSE = tonumber(os.getenv("NOSE") or (PLANE and 1 or 3))
 T = 0
 local function qmul(a, b)
@@ -93,8 +95,8 @@ local function phys(dt)
     S.om.y = S.om.y + (MY * Eng.gx * steps + py - DAMP * S.om.y) * dt
     S.om.z = S.om.z * (1 - 2 * dt)
   else
-    local ax = -AY * Eng.gy * k + tx
-    local az = AX * Eng.gx * k - CPL * Eng.gy * k + tz
+    local ax = -AY * Eng.gy * k + tx + BIASX * k
+    local az = AX * Eng.gx * k - CPL * Eng.gy * k + tz + BIASZ * k
     S.om.x, S.om.z = S.om.x + ax * dt, S.om.z + az * dt
     S.om.x, S.om.y, S.om.z = S.om.x * (1 - 0.2 * dt), S.om.y, S.om.z * (1 - 0.2 * dt)
   end

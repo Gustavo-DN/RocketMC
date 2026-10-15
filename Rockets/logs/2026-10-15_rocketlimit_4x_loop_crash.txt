@@ -1,0 +1,17 @@
+ROCKET LIMIT TEST: FELL OVER, ENGINE CUT
+MASS 10.50  THRUST 166.4 m/s2 per full throttle  HOVER 0.063
+GIMBAL MAP at throttle 0.120: ang_x = +0.25*gx -6.40*gy  ang_z = +5.24*gx -0.54*gy  (bias -0.04 +0.24)
+GIMBAL measured max move 0.048 per tick (0.95 per s)
+DIRECTION north (yaw 180)  HEIGHT +150  START 3367.2 -58.4 -14218.8
+STOP: FELL OVER NEAR THE GROUND
+PEAK SPEED 0.0 m/s
+FASTEST CLEAN SPEED none (every band up to it: error < 10 deg, spin < 0.3, off track < 10, altitude < 10)
+ENDED AT 3366 -58 -14242
+
+speed_band   time_s  max_err  max_spin  max_off  max_alt  max_aoa  gimbal_avg  gimbal_max  sat%
+
+START mass 10.50, thrust 162.7 m/s2, hover throttle 0.065, 1 fuel tank(s), 4 thruster(s), heading north, height +150
+LIFTOFF at throttle 0.150, 0.7 s
+THRUST about 166.4 m/s2 at full throttle (hover 0.063)
+GIMBAL MAP ang_x = +0.25*gx -6.40*gy   ang_z = +5.24*gx -0.54*gy   (actual gimbal read)
+ENGINE CUT: lying on the ground
