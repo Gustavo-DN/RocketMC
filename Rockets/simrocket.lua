@@ -31,6 +31,7 @@ local DRAGK = tonumber(os.getenv("DRAG") or 0.1)
 local KAERO = tonumber(os.getenv("KAERO") or 0)
 local TQMAX = tonumber(os.getenv("TQMAX") or 1e9)
 local TMAX = tonumber(os.getenv("TMAX") or 300)
+local SLEW = tonumber(os.getenv("SLEW") or 1e9)
 local NOSE = tonumber(os.getenv("NOSE") or (PLANE and 1 or 3))
 T = 0
 local function qmul(a, b)
@@ -68,8 +69,9 @@ local function phys(dt)
     end
   end
   local a = math.min(1, dt / 0.23)
-  Eng.gx = Eng.gx + (q15(Eng.tx) - Eng.gx) * a
-  Eng.gy = Eng.gy + (q15(Eng.ty) - Eng.gy) * a
+  local sl = SLEW * dt
+  Eng.gx = Eng.gx + math.max(-sl, math.min(sl, (q15(Eng.tx) - Eng.gx) * a))
+  Eng.gy = Eng.gy + math.max(-sl, math.min(sl, (q15(Eng.ty) - Eng.gy) * a))
   local tq = math.floor(Eng.thr * 15 + 1e-9) / 15
   local k = tq / (2 / 15)
   local bv = qrot({ w = S.q.w, x = -S.q.x, y = -S.q.y, z = -S.q.z }, S.vel)
