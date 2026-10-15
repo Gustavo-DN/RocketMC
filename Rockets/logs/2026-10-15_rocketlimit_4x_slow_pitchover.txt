@@ -1,0 +1,23 @@
+ROCKET LIMIT TEST: LANDED
+MASS 10.50  THRUST 194.6 m/s2 per full throttle  HOVER 0.050
+GIMBAL MAP at throttle 0.050: ang_x = -0.02*gx -4.55*gy  ang_z = +4.76*gx +0.07*gy  (bias -0.01 -0.00)
+GIMBAL measured max move 0.045 per tick (0.89 per s)
+DIRECTION north (yaw 180)  HEIGHT +150  START 3365.4 -58.4 -14243.1
+STOP: UNSTABLE: nose 56 deg off
+SPEED AT STOP 7.0 m/s at 6.4 s of run, 21 blocks down track
+PEAK SPEED 10.5 m/s
+FASTEST CLEAN SPEED none (every band up to it: error < 10 deg, spin < 0.3, off track < 10, altitude < 10)
+ENDED AT 3371 -58 -14287
+
+speed_band   time_s  max_err  max_spin  max_off  max_alt  max_aoa  gimbal_avg  gimbal_max  sat%
+
+START mass 10.50, thrust 162.7 m/s2, hover throttle 0.065, 1 fuel tank(s), 4 thruster(s), heading north, height +150
+LIFTOFF at throttle 0.150, 0.7 s
+THRUST about 211.6 m/s2 at full throttle (hover 0.050)
+GIMBAL MAP ang_x = -0.02*gx -4.55*gy   ang_z = +4.76*gx +0.07*gy   (actual gimbal read)
+AT HEIGHT, holding (t 28.9)
+MEASURED THRUST 194.6 m/s2 at full throttle (estimate was 211.6)
+RUN: accelerating north (t 33.9)
+TEST END: UNSTABLE: nose 56 deg off at 7.0 m/s (t 40.2)
+STOPPED at 3371 105 -14285, descending
+LANDED at 3371 -58 -14287, tilt 1 deg

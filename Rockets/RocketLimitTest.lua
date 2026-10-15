@@ -74,7 +74,9 @@ local C = {
   TOP_WIN = 20,
   TOP_MIN_T = 60,
   MIN_ALT = 30,
-  RUN_RATE = 15,
+  RUN_RATE = 30,
+  LEASH = 10,
+  RUN_THR_MIN = 0.2,
   TOP_GAIN = 2,
   MAX_T = 900,
 
@@ -616,8 +618,9 @@ local function run()
       local W = add(add(mul(fwd, aF), mul(rgt, aL)), mul(UP, aY))
       local want = unit(W)
       cmd = turnToward(cmd, want, math.rad(stage == "RUN" and C.RUN_RATE or C.CMD_RATE) * dt)
+      if stage == "RUN" and math.deg(math.acos(clamp(dot(cmd, nose), -1, 1))) > C.LEASH then cmd = turnToward(nose, cmd, math.rad(C.LEASH)) end
       if stage == "RUN" then
-        thrAvg = clamp(aY / (R.tacc * math.max(nose.y, 0.02)), 0.005, 1)
+        thrAvg = clamp(math.max(aY / (R.tacc * math.max(nose.y, 0.02)), C.RUN_THR_MIN), 0.005, 1)
       else
         thrAvg = clamp(len(W) / R.tacc / math.max(dot(nose, want), 0.5), 0.005, 1)
       end
